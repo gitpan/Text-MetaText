@@ -1,3 +1,5 @@
+# this tests evaluations in INCLUDE directives
+
 # test of simple evaluations
 Testing: 1 && 0
 
@@ -53,5 +55,9 @@ Testing: doit
 <<< block pass=31 >>>
 Testing: dont 
 
+Testing: doit == 0
+
+Testing: dont == 0
+<<< block pass=34 >>>
 
 

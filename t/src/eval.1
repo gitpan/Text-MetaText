@@ -1,3 +1,5 @@
+# this tests evaluations in INCLUDE directives
+
 # test of simple evaluations
 Testing: 1 && 0
 %% INCLUDE foo pass=1 if="1 && 0" %%
@@ -53,6 +55,10 @@ Testing: doit
 %% INCLUDE foo pass=31 if="doit" %%
 Testing: dont 
 %% INCLUDE foo pass=32 if="dont" %%
+Testing: doit == 0
+%% INCLUDE foo pass=33 if="doit == 0" %%
+Testing: dont == 0
+%% INCLUDE foo pass=34 if="dont == 0" %%
 
 
 __END__

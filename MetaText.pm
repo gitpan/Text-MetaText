@@ -3,9 +3,9 @@
 # Text::MetaText
 #
 # DESCRIPTION
-#   Perl 5 module to process text files, featuring variable substitution,
-#   file inclusion, conditional operations, print filters and formatting,
-#   etc.
+#   Perl 5 module to process template files, featuring variable 
+#   substitution, file inclusion, conditional operations, print 
+#   filters and formatting, etc.
 #
 # AUTHOR
 #   Andy Wardley   <abw@kfs.org>
@@ -14,16 +14,11 @@
 #   Copyright (C) 1996-1998 Andy Wardley.  All Rights Reserved.
 #
 #   This module is free software; you can redistribute it and/or
-#   modify it under the same terms as Perl itself.
-#
-#   Text::MetaText is based on a template processing language (with the
-#   elegant working title of "Template::Base") I developed while working
-#   at Peritas Ltd.  I am indebted to Peritas for allowing me to use this 
-#   work as the basis for MetaText and to release it to the public domain.
+#   modify it under the terms of the Perl Artistic Licence.
 #
 #----------------------------------------------------------------------------
 #
-# $Id: MetaText.pm,v 0.15 1998/02/04 08:57:14 abw Exp abw $
+# $Id: MetaText.pm,v 0.19 1998/04/02 09:25:16 abw Exp abw $
 #
 #============================================================================
  
@@ -32,10 +27,11 @@ package Text::MetaText;
 use strict;
 use FileHandle;
 use Date::Format;
-use vars qw( $VERSION @ISA $AUTOLOAD );
+use vars qw( $VERSION @ISA $DIRECTIVE $ERROR );
+
+use Text::MetaText::Directive;
 
 require 5.004;
-require AutoLoader;
 
 
 
@@ -43,25 +39,22 @@ require AutoLoader;
 #                      -----  CONFIGURATION  -----
 #========================================================================
  
-@ISA     = qw(AutoLoader);
-$VERSION = sprintf("%d.%02d", q$Revision: 0.15 $ =~ /(\d+)\.(\d+)/);
+$VERSION   = sprintf("%d.%02d", q$Revision: 0.19 $ =~ /(\d+)\.(\d+)/);
+$DIRECTIVE = 'Text::MetaText::Directive';
 
-# pseudo-class name to identify directives
-my $DIRECTIVE = 'DIRECTIVE';
-
-# debug level constants (this will get nicer one day RSN)
-use constant DBGNONE =>    0;  # no debugging
-use constant DBGINFO =>    1;  # information message only
-use constant DBGCONF =>    2;  # configuration details
-use constant DBGPREP =>    4;  # show pre-processor operations
-use constant DBGPROC =>    8;  # show process operation
-use constant DBGPOST =>   16;  # show post-process operation
-use constant DBGDATA =>   32;  # show data elements (parameters)
-use constant DBGCONT =>   64;  # show content of blocks
-use constant DBGFUNC =>  128;  # private function calls
-use constant DBGEVAL =>  256;  # show conditional evaluation steps
-use constant DBGTEST =>  512;  # test code
-use constant DBGALL  => 1023;  # all debug information
+# debug level constants (debugging will get nicer one day RSN)
+use constant DBGNONE  =>    0;  # no debugging
+use constant DBGINFO  =>    1;  # information message only
+use constant DBGCONF  =>    2;  # configuration details
+use constant DBGPREP  =>    4;  # show pre-processor operations
+use constant DBGPROC  =>    8;  # show process operation
+use constant DBGPOST  =>   16;  # show post-process operation
+use constant DBGDATA  =>   32;  # show data elements (parameters)
+use constant DBGCONT  =>   64;  # show content of blocks
+use constant DBGFUNC  =>  128;  # private method calls
+use constant DBGEVAL  =>  256;  # show conditional evaluation steps
+use constant DBGTEST  =>  512;  # test code
+use constant DBGALL   => 1023;  # all debug information
 
 my $DBGNAME = {
     'none'     => DBGNONE,
@@ -109,191 +102,105 @@ sub new {
 
 #========================================================================
 #
-# process($symbol, \%tags, $depth)
+# process_file($file, ...) 
 #
-# This is the main (in fact, only) processing method for MetaText objects.
-# The $symbol parameter identifies a file or defined BLOCK...ENDBLOCK
-# that requires processing.  When process() comes across a symbol that
-# it doesn't already know about, it calls _load_symbol($symbol) to find 
-# the file, read and parse it and store the contents in an object symbol 
-# table, $self->{ SYMTABLE }, which itself is a hash indexed by the symbol 
-# name.  Assuming all goes to plan, process() can then read the contents
-# of the symbol table entry and process accordingly.  Future invocations
-# of process() for the same symbol are able to use the cached version in
-# the symbol table without the need to reload and parse the file.
+# Public method for processing files.  Calls _parse_file($file) to 
+# parse and load the file into the symbol table (indexed by $file)
+# and then calls $self->_process($file, @_) to process the symbol table
+# and generate output.  Any other parameters passed to process_file()
+# (such as a pre-defined variables hash, \%tags) are propagated through 
+# to _process() and the return value is propagated back up to the caller.
 #
-# Calling process(...) is equivalent to a %% INCLUDE %% directive in a 
-# file.  In fact, when process() finds an INCLUDE directive in the symbol
-# it is processing, it recursively calls itself to process the symbol
-# and includes the output in its place. 
+# Returns the result of $self->_process($file, @_) which may be undef to
+# indicate a processing error.  May also return undef to indicate a 
+# parse error.  On success, a text string is returned which contains the
+# output of the process stage.
+# 
+#========================================================================
+
+sub process_file {
+    my $self = shift;
+    my $file = shift;
+
+
+    $self->_DEBUG(DBGFUNC, "process_file($file, %s)\n", join(", ", @_));
+
+
+    # parse the file into the symbol table if it's not already there
+    unless ($self->_symbol_defined($file)) {
+	return undef unless defined $self->_parse_file($file);
+    }
+
+    # call _process to do the real processing and implicitly return result
+    $self->_process($file, @_);
+}
+
+
+
+#========================================================================
 #
-# The $tags parameter is an optional reference to a hash array which 
-# can contain pre-defined tags for substitution while processing the 
-# symbol.  Thus, a tags table that contains "{ 'foo' => 'bar' } will 
-# produce the output "bar" for a corresponding "%% foo %%" directive.
+# process_text($text, \%tags) 
 #
-# $depth is an internal counter which is used to identify and prevent 
-# infinite recursion.  You can safely ignore this.
+# Public method for processing text strings.  Calls _parse_text($text) to 
+# parse the string and return a reference to an anonymous array, $block,
+# which represents the parsed text string, separated by newlines.  This 
+# is then passed to $self->_process($block, @_) along with any other 
+# parameters passed in to process_text() (such as a hash reference of 
+# pre-defined variables).
+#
+# Returns the result of $self->_process($block, @_) which may be undef to
+# indicate a processing error.  May also return undef to indicate a 
+# parse error.  On success, a text string is returned which contains the
+# output of the process stage.
+# 
+#========================================================================
+
+sub process_text {
+    my $self = shift;
+    my $text = shift;
+    my $block;
+
+
+    $self->_DEBUG(DBGFUNC, "process_text($text, ", join(", ", @_), ")\n");
+
+
+    # parse the text and store the returned block array
+    return undef unless defined($block = $self->_parse_text($text));
+
+    # call _process to do the real processing and implicitly return result
+    $self->_process($block, @_);
+}
+
+
+
+#========================================================================
+#
+# process($file, \%tags) 
+#
+# Alias for 'process_file(@_)' which is provided for backward 
+# compatibility with older MetaText versions.
 #
 #========================================================================
 
 sub process {
+    my $self = shift;
+    $self->process_file(@_);
+}
+
+
+
+#========================================================================
+#
+# error()
+#
+# Public method returning contents of internal ERROR string.
+#
+#========================================================================
+
+sub error {
     my $self   = shift;
-    my $symbol = shift;
-    my $tags   = shift || {};
-    my $depth  = shift || 1;
 
-    my ($item, $keyword);
-    my @output = ();
-
-
-    $self->_DEBUG(DBGFUNC, "process($symbol, $tags, $depth)\n");
-
-
-    # convert symbol to lower case unless CASE sensitivity is set
-    $symbol = lc $symbol unless $self->{ CASE };
-
-    # DEBUG code
-    if ($self->{ DEBUGLEVEL } & DBGPROC) {
-	$self->_DEBUG(DBGPROC, "Process ($depth): $symbol\n");
-
-	foreach (keys %$tags) {
-	    # print tags value, de-referencing if it's an array ref
-	    my $datastr = $tags->{ $_ };
-	    $datastr = "[ " . join(',', @$datastr) . " ]"
-		    if ref($datastr) eq 'ARRAY';
-
-	    # interpolate $variables
-	    $datastr .= " (" . $self->_interpolate($tags->{ $_ }, $tags) . ")" 
-		    if $tags->{ $_ } =~ /^\$/;
-
-	    $self->_DEBUG(DBGDATA, "  %s => $datastr\n", $_);
-	}
-    }
-
-
-    # check for excessive recursion
-    if ($depth > $self->{ MAXDEPTH }) {
-	$self->_warn("Maximum recursion exceeded\n");
-	return;
-    }
-
-    # load the symbol if it's not already in the symbol table
-    unless (defined($self->{ SYMTABLE }->{ $symbol })) {
-	$self->_load_symbol($symbol) || return;
-    }
- 
-    #
-    # The symbol table entry for $symbol ($self->{ SYMTABLE }->{ $symbol })
-    # is a reference to an array.  Each element in the array can be either
-    # a plain text string or a hash array blessed into the $DIRECTIVE class.
-    # The former represent normal text blocks in the processed file, the
-    # latter represent pre-parsed MetaText directives (see _load_symbol(),
-    # _pre_process() and _parse_directive() for more detail on this stage).
-    # A directive will contain one or more of the following elements, based
-    # on the directive type and other data defined in the directive block:
-    #
-    #  $directive->{ KEYWORD }     # directive type: INCLUDE, DEFINE, etc
-    #  $directive->{ IDENTIFIER }  # KEYWORD target, i.e. INCLUDE <filename>
-    #  $directive->{ PARAMS }      # hash ref of variables defined
-    #  $directive->{ PARAMSTR }    # original parameter string
-    #  $directive->{ IF }          # an "if=..." conditional
-    #  $directive->{ UNLESS }      # ditto "unless=..."
-    # 
-
-    # process each each line from the block
-    foreach $item (@{ $self->{ SYMTABLE }->{ $symbol } }) {
-
-	# get rid of the non-directive cases first...
-	unless (ref($item) eq $DIRECTIVE) {
-
-	    # return content if we find the end-of-content marker 
-	    return join("", @output)
-		if $item =~ /^__END__$/;
-
-	    # not a directive - so just push output and loop
-	    push(@output, $item);
-
-	    next;
-	}
-
-
-	# test any "if=<condition>" statement...
-	if ($item->{ IF }) {
-	    my $result = $self->_evaluate($item->{ IF }, $tags, 
-			$item->{ DELIMITER } || $self->{ DELIMITER });
-	    next unless defined($result) && $result > 0;
-	}
-
-	# ...and/or any "unless=<condition>" statement
-	if ($item->{ UNLESS }) {
-	    my $result = $self->_evaluate($item->{ UNLESS }, $tags, 
-			$item->{ DELIMITER } || $self->{ DELIMITER });
-	    next if defined($result) && $result != 0;
-	}
-
-
-	$keyword = $item->{ KEYWORD };
-
-	$keyword eq 'DEFINE' && do {
-	    # merge all the new definitions in $item->{ PARAMS } 
-	    # into the current '$tags' definitions hash array 
-	    $tags = { %$tags, %{ $item->{ PARAMS } } };
-
-	    next;
-	};
-
-	$keyword eq 'INCLUDE' && do {
-	    # create a new super-set of existing tags and those 
-	    # defined within the INCLUDE directive
-	    my $newtags = defined($item->{ PARAMS })
-		    ? { %$tags, %{$item->{ PARAMS }} }
-		    : $tags;
-
-	    # interpolate any embedded tags within ident
-	    my $ident = $self->_interpolate($item->{ IDENTIFIER }, $tags);
-
-	    # process the INCLUDE'd symbol and push to output
-	    push(@output, 
-		$self->_post_process($item, 
-		$self->process($ident, $newtags, $depth + 1)));
-
-	    next;
-	};
-
-	$keyword eq 'SUBST' && do {
-
-	    # call _substitute to handle token substitution
-	    my $rep = $self->_substitute($item, $tags);
-	    if (defined($rep)) {
-		$rep = $self->_post_process($item, $rep);
-	    }
-	    else {
-		# unrecognised token
-	    	$self->_warn("Unrecognised token: $item->{ IDENTIFIER }\n")
-		    if grep(/\bwarn\b/, $self->{ ROGUE });
-
-	    	# resolve nothing if 'delete' is defined as a ROGUE option
-		$rep = grep(/\bdelete\b/, $self->{ ROGUE })
-		       ? ""
-		       : $self->{ MAGIC }->[ 0 ]       # rebuild directive
-		         . " $item->{ IDENTIFIER } "
-		         . ($item->{ PARAMSTR } || "")
-		         . " "
-		         . ($self->{ MAGIC }->[ 1 ]);
-	    }
-
-	    push(@output, $rep);
-
-	    next;
-	};
-
-	# invalid directive;  this shouldn't happen
-	$self->_warn("Unrecognise directive: $keyword\n")
-    }
-
-    # post process output tokens and return as a single line
-    join("", @output);
+    return $self->{ ERROR };
 }
 
 
@@ -317,14 +224,20 @@ sub _configure {
     my $cfg  = shift;
 
 
+    # initialise class data members
+    $self->{ SYMTABLE }   = {};
+    $self->{ LINES }      = [];
+    $self->{ ERROR }      = '';   # error string (not ERRORFN!)
+
     # set configuration defaults
-    $self->{ MAXDEPTH   } = 32;
-    $self->{ DEBUGLEVEL } = DBGNONE;
-    $self->{ MAGIC }      = [ '%%', '%%' ];
-    $self->{ LIB }        = "";
-    $self->{ ROGUE }      = "";   # how to handle rogue directives
-    $self->{ CASE }       = 1;    # case sensitivity
-    $self->{ CHOMP }      = 0;    # chomp straggling newlines 
+    $self->{ DEBUGLEVEL } = DBGNONE;           # DEBUG mask
+    $self->{ MAGIC }      = [ '%%', '%%' ];    # directive delimiters
+    $self->{ MAXDEPTH   } = 32;   # maximum recursion depth
+    $self->{ LIB }        = "";   # library path for INCLUDE
+    $self->{ ROGUE }      = {};   # how to handle rogue directives
+    $self->{ CASE }       = 0;    # case sensitivity flag
+    $self->{ CASEVARS }   = {};   # case sensitive variables
+    $self->{ CHOMP }      = 0;    # chomp straggling newlines
     $self->{ EXECUTE }    = 0;    # execute SUBST as function?
     $self->{ DELIMITER }  = ',';  # what splits a list?
     $self->{ FILTER }     = {     # pre-defined filters
@@ -358,7 +271,7 @@ sub _configure {
     foreach (keys %$cfg) {
 
 	# set simple config values (converting keyword to UPPER case)
-	/^MAXDEPTH|LIB|DELIMITER|CASE|CHOMP|EXECUTE$/i && do {
+	/^(MAXDEPTH|LIB|DELIMITER|CASE|CHOMP|EXECUTE)$/i && do {
 	    $self->{ "\U$_" } = $cfg->{ $_ };
 	    next;
 	};
@@ -388,18 +301,34 @@ sub _configure {
 	# ROGUE defines how unrecognised (rogue) directives should
 	# be handled.  
 	/^ROGUE$/i && do {
-	    # create a list reference of valid ROGUE options and
+	    # create a hash reference of valid ROGUE options and
 	    # print a warning message about invalid options
-	    $self->{ ROGUE } = join(',',
-		map {
-		    /^warn|delete$/i
-		    ? "\L$_"
-		    : $self->_warn("Invalid roque option: \L$_\n") 
-			&& ();  # warn, then return empty list for map
-		} split(/\W+/, $cfg->{ $_ }) );
+	    foreach my $rogue (split(/\W+/, $cfg->{ $_ })) {
+		if ($rogue =~ /^warn|delete$/i) {
+		    $self->{ ROGUE }->{ uc $rogue } = 1;
+		}
+		else {
+		    $self->_warn("Invalid rogue option: \L$_\n");
+		}
+	    }
 	    next;
 	};
 
+	# CASEVARS are those variables which don't get folded to lower 
+	# case when case sensitivity is turned off.  This is useful for 
+	# metapage which likes to define some "system" variables in 
+	# UPPER CASE such as FILETIME, FILENAME, etc.
+	/^CASEVARS$/i && do {
+	    if (ref($cfg->{ $_ }) eq 'ARRAY') {
+		foreach my $var (@{ $cfg->{ $_ } }) {
+		    $self->{ CASEVARS }->{ $var } = 1;
+		}
+	    }
+	    else {
+		$self->_warn("CASEVARS option expects an array ref\n");
+	    }
+	    next;
+	};
 
 	# MAGIC needs a little processing to convert to a 2 element
 	# ARRAY ref if a single string was specified (i.e. for both)
@@ -414,12 +343,14 @@ sub _configure {
 	    next;
 	};
 
-	# set ERROR/DEBUG handling function, check for a CODE reference
-	/^ERROR|DEBUG$/i && do {
+	# set ERROR/DEBUG handling function, checking for a CODE reference
+	# NOTE: error function is stored internally as 'ERRORFN' and not as
+	# 'ERROR' which is the object error status (backwards compatability).
+	/^(ERROR|DEBUG)(FN)?$/i && do {
 	    # check this is a code reference	
 	    $self->_warn("Invalid \L$_\E function\n"), next
 		unless ref($cfg->{ $_ }) eq 'CODE';
-	    $self->{ "\U$_" } = $cfg->{ $_ };
+	    $self->{ uc $1 . "FN" } = $cfg->{ $_ };
 	    next;
 	};
 
@@ -439,115 +370,125 @@ sub _configure {
 
 
 
-#========================================================================
-# 
-# _load_symbol($symbol)
-#
-# Attempts to load the specified symbol from a file into the object's
-# symbol table.  
-#
-# Returns 1 on success or 0 on failure.
-#
-#========================================================================
-
-sub _load_symbol {
-    my $self   = shift;
-    my $symbol = shift;
-    my $fp;
-
-
-    $self->_DEBUG(DBGFUNC, "_load_symbol($symbol)\n");
-
-
-    my $symfile = $self->_find_file($symbol) or return 0;
-
-    # open file
-    unless (defined($fp = new FileHandle "$symfile")) {
-	$self->warn("$symfile: $!\n");
-	return 0;
-    }
-
-    # call preprocess to load the symbol and any self-contained blocks
-    # into our current symbol table
-    $self->_pre_process($fp, $symbol);
-
-    # NB: file is closed automatically when $fp goes out of scope
-
-    # return OK status
-    1;
-}
-
-
 
 #========================================================================
 #
-# _find_file($symbol)
+# _parse_file($file) 
 #
-# Attempts to locate a file with the same name as the specified symbol.
-# If the symbol starts with a '/', it is assumed to be an absolute file
-# path.  Otherwise, the current directory and all the directories specified
-# in the LIB entry in the config hash array are searched.
+# Attempts to locate a file with the filename as specified in $file.
+# If the filename starts with a '/' or '.', it is assumed to be an absolute 
+# file path or one relative to the current working directory.  In these 
+# cases, no attempt to look for it outside of its specified location is made.
+# Otherwise, the directories specified in the LIB entry in the config hash 
+# array are searched followed by the current working directory.  If the file 
+# is found, a number of member data items are initialised, the file is 
+# opened and then _parse($file) is called to parse the file.
 #
-# Returns a full file path or undef on failure.
+# Returns the result from _parse() or undef on failure.  
 #
 #========================================================================
 
-sub _find_file {
-    my $self   = shift;
-    my $symbol = shift;
-    my ($dir, $fullpath);
+sub _parse_file {
+    my $self = shift;
+    my $file = shift;
+    my ($dir, $filepath);
 
 
-    $self->_DEBUG(DBGFUNC, "_find_file($symbol)\n");
+    $self->_DEBUG(DBGFUNC, "_parse_file($file)\n");
 
 
-    # default $fullpath to $symbol (may be an absolute path)
-    $fullpath = $symbol;
+    # default $filepath to $file (may be an absolute path)
+    $filepath = $file;
 
-    # file is relative to $tags->{ directory } unless it starts '/'
-    if (defined($self->{ LIB }) && $symbol !~ /^\//) {
+    # file is relative to $self->{ LIB } unless it starts '/' or '.'
+    if (defined($self->{ LIB }) && $filepath !~ /^[\/\.]/) {
 
-	foreach $dir ('.', split(/[|;:,]/, $self->{ LIB })) {
+	foreach $dir (split(/[|;:,]/, $self->{ LIB }), '.') {
 	    # construct a full file path
-	    $fullpath  = $dir;
-	    $fullpath .= '/' unless ($fullpath =~ /\/$/);
-	    $fullpath .= $symbol;
+	    $filepath  = $dir;
+	    $filepath .= '/' unless ($filepath =~ /\/$/);
+	    $filepath .= $file;
 
 	    # test if the file exists
-	    last if -f $fullpath;
+	    last if -f $filepath;
 	}
     }
 
-    # check we resolved a filename (this isn't superfluous because the
-    # above loop may drop out of the bottom)
-    unless (-r $fullpath) {
-	$self->_warn("$fullpath: $!\n");
+    # open file (may still fail if above loop dropped out the bottom)
+    unless (defined($self->{ FILE } = new FileHandle $filepath)) {
+	$self->_error("$filepath: $!\n");
 	return undef;
     }
 
-    $self->_DEBUG(DBGINFO, "loading file: $fullpath\n");
+    $self->_DEBUG(DBGINFO, "loading file: $filepath\n");
 
-    # return validated fullpath
-    $fullpath;
+    # initialise file stats 
+    $self->{ LINENO }   = 0;    # no of lines read from _get_line();
+    $self->{ PUTBACK }  = 0;    # no of lines put back via _unget_line();
+    $self->{ FILENAME } = $file;
+    $self->{ FILEPATH } = $filepath;
+    $self->{ INPUT }    = "$file";  # used for error reporting
+
+    # call _parse($file) and implicitly return result
+    $self->_parse($file);
 }
 
 
 
 #========================================================================
 #
-# _pre_process($fp, $symbol, $depth)
+# _parse_text($text, $symbol) 
 #
-# Reads the file stream from $fp, loading the lines into the symbol entry
-# in the internal symbol table indexed by the name $symbol.  Processing
-# continues until an EOF, a line containing "__END__", or a lone 
-# %% ENDBLOCK %% directive is encountered.  Any remaining text following 
-# an %% ENDBLOCK %% directive, up to the end of the current line, is 
-# returned for the calling process to handle or ignore (this simplifies 
-# the recursion process described below).
+# Initialises the text member data so that _get_line() can read from it
+# and then calls _parse() to parse the text contents.  If $symbol is 
+# defined it is used as the symbol name which is then stored in the 
+# symbol table.  If $symbol is undefined, the block remains anonymous.
+#
+# Returns the result from _parse().
+#
+#========================================================================
+
+sub _parse_text {
+    my $self   = shift;
+    my $text   = shift;
+    my $symbol = shift;  # may be undef
+
+
+    $self->_DEBUG(DBGFUNC, "_parse_text($text)\n");
+
+
+    # set text string and initialise stats
+    $self->{ LINENO }  = 0;   # no of lines read from _get_line();
+    $self->{ PUTBACK } = 0;   # no of lines put back via _unget_line();
+    $self->{ TEXT }    = $text;
+    $self->{ INPUT }   = "text string";  # used for error reporting
+
+    # call _parse() and implicitly return result
+    $self->_parse($symbol);
+}
+
+
+
+#========================================================================
+#
+# _parse() 
+#
+# The _parse() method reads the current input stream which may originate
+# from a file (_parse_file($file)) or a text string (_parse_text($text)).
+# The contents are split into chunks of plain text or MetaText directives
+# (enclosed by the MAGIC tokens).  Text chunks are pushed directly onto
+# an output list, while directives are parsed and blessed into a directive 
+# class before being pushed out.  A reference to the output list is 
+# returned.  If a symbol name is passed as the first parameter to parse(),
+# then a corresponding entry in the $self->{ SYMTABLE } hash is created
+# to reference this list.
+
+# Processing continues until EOF is reached or an %% END(BLOCK|IF)? %% 
+# directive is encountered.  
 #
 # Blocks encountered that are bounded by a matched pair of %% BLOCK name %%
 # ... %% ENDBLOCK %% directives will cause a recursive call to 
-# $self->_pre_process() to be made to handle the block definition for
+# $self->_parse($blockname) to be made to handle the block definition for
 # the sub-block.  Block definitions can theoretically be nested indefinately 
 # although in practice, the process ends when an upper recursion limit is 
 # reached ($self->{ MAXDEPTH }).  To this effect,  $depth is used to 
@@ -555,406 +496,791 @@ sub _find_file {
 #
 #========================================================================
 
-sub _pre_process {
+sub _parse {
     my $self   = shift;
-    my $fp     = shift;
-    my $symbol = shift;
+    my $symbol = shift;   # may be undef - i.e. anonymous symbol
     my $depth  = shift || 1;
-    my ($symtabent, $line, $nextline);	
+    my ($magic1, $magic2);
+    my ($line, $nextline);
+    my ($symtabent, $directive);
 
 
-    $self->_DEBUG(DBGFUNC, "_pre_process($fp, $symbol, $depth)\n");
+    $self->_DEBUG(DBGFUNC, "_parse(%s)\n", defined $symbol ? $symbol : "");
 
 
     # check for excessive recursion
     if ($depth > $self->{ MAXDEPTH }) {
-	$self->_warn("Maximum recursion exceeded\n");
-	return;
-    }
-
-    # set the symbol table entry to a null list and get a local reference
-    $symtabent = $self->{ SYMTABLE }->{ $symbol } = [];
-
-    # get a local copy of the MAGIC symbols for efficiency
-    my ($magic1, $magic2) = @{ $self->{ MAGIC } };
-
-    # read each line from the input file
-    READLINE: while (defined($line = <$fp>)) {
-		
-	# you may wonder why we don't read a paragraph at a time
-	# ($/ = ''), but I'm allowing for the fact that directives
-	# may contain blank lines and thus span paragraphs.
-
-	# split the line into %%TAGS%% and non-tags
-	while ($line =~ /
-		    (.*?)        # anything before the %%  ($1)
-		    $magic1      # indicates the start of a magic token
-		    \s*          # some optional whitespace
-		    (.*?)        # parameters ($2)
-		    \s*          # even more whitespace 
-		    (            # all of this is optional... ($3)
-		      ($magic2)  # closing magic token ($4)
-		      (.*)       # rest of the line ($5)
-		    )?           # see, I said it was optional
-		    $            # EOL, so that it all gets eaten
-		    /x) {
-
-	    # 
-	    # if the closing magic symbol '%%' wasn't found in 
-	    # $5 as expected, then it suggests that the directive 
-	    # continues onto the next line, so we append the next 
-	    # line and try again.
-	    #
-	    unless ($4) {
-		# if we can't read another line, tack on the 
-		# magic token to avoid a dangling directive
-		unless (defined($nextline = <$fp>)) {
-		    $nextline = $magic2;
-		    $self->_warn("Closing directive tag missing in $symbol\n");
-		}
-		chomp($line);
-		$line .= $nextline;
-		next;
-	    }
-
-	    # push any pre-tag text onto the output list
-	    push(@$symtabent, $1) if $1;
-
-	    # save any post-tag text back into line for next time 
-	    # around; if CHOMP is defined and the remainder of the 
-	    # line is empty, it is disregarded and no effort is made
-	    # to replace the newline which the earlier regex chomped 
-	    # off.  The net result is that a newline coming immediately
-	    # after a directive block is chomped.  If CHOMP is not
-	    # set, the newline is added regardless.
-	    $line = $self->{ CHOMP } 
-	            ? ($5 ? "$5\n" : "")
-		    : "$5\n";
-
-	    # process any tag that was found
-	    $2 && do {
-		my $directive = $self->_parse_directive($2);
-
-		$directive->{ KEYWORD } =~ /^BLOCK$/ && do {
-		    # we're about to recursively call ourself to 
-		    # process the BLOCK definition, but we may have 
-		    # already read part of the line *after* the %% BLOCK %%
-		    # directive.  It doesn't belong to us so we rewind 
-		    # the file pointer a little so it can be re-read
-		    # by the _pre_process() function we call.
-
-		    seek($fp, -(length($line)), 1) if $line;
-
-		    # call onself to preprocess the BLOCK
-		    $line = $self->_pre_process($fp, 
-			    $directive->{ IDENTIFIER }, $depth + 1);
-	
-		    # if "print" was specified as a BLOCK option, convert 
-		    # the BLOCK directive to an INCLUDE and push it 
-		    # onto the stack to ensure the original gets replicated.
-
-		    $directive->{ KEYWORD } = 'INCLUDE';
-		    push(@$symtabent, $directive)
-    			if (defined($directive->{ PRINT }));
-
-		    next;
-		};
-
-		$directive->{ KEYWORD } =~ /^END(BLOCK)?$/ && do {
-
-		    if ($self->{ DEBUGLEVEL } & DBGCONT) {
-			$self->_dump_symbol($symbol);
-		    }
-
-		    # return any remaining post-"%%ENDBLOCK%%" text
-		    return $line;
-		};
-
-		$directive->{ KEYWORD } eq 'DEFINE' && do {
-		    # DEFINE directives get pushed on as they are
-		    push(@$symtabent, $directive);
-		    next READLINE unless $line;
-		};
-
-
-		# no other processing required, so push on as it is
-		push(@$symtabent, $directive);
-	    };
-
-	}   # while ($line =~ / ...
-
-	# push any remaining text
-	push(@$symtabent, $line) if $line;
-    }
-
-    # DEBUG code
-    if ($self->{ DEBUGLEVEL } & DBGCONT) {
-	    $self->_dump_symbol($symbol);
-    }
-}
-
-
-
-#========================================================================
-#
-# _parse_directive($params)
-#
-# Splits the directive parameter string into it's component parts which
-# may include a keyword (e.g. INCLUDE), an identifier (e.g. the name of the
-# block/file to include), a conditional (e.g. if="day > 3") and a number
-# of parameters (e.g. name=Larry animal=camel).  The combination of the
-# elements present depends partly on the keyword type, so we examine this
-# and break down the data accordingly.
-#
-# The elements are stored in a hash array which is then blessed into a 
-# pseudo "DIRECTIVE" class.  This allows the process that reads the 
-# symbol table list that this becomes part of, to readily identify a
-# DIRECTIVE and distinguish it from normal text.  
-#
-#========================================================================
-
-sub _parse_directive {
-    my $self   = shift;
-    my $prmstr = shift;
-    my $direct = bless {}, $DIRECTIVE;
-
-    my ($keyword, $identifier, $params, $tags);
-    my @control = qw(IF UNLESS FILTER FORMAT PRINT);
-    my $ctrlstr = join('|', @control);
-
-
-    $self->_DEBUG(DBGFUNC, "_parse_directive($prmstr)\n");
-
-
-    # identify the elements of the parameter string
-    $prmstr  =~ /(\S+)\s*(.*)/;
-
-    $keyword = $1;
-    $params  = $2 || '';
-
-
-    # check something was specified in the %% ... %%
-    unless ($keyword) {
-	$self->_warn("Missing directive keyword\n");
+	$self->_error("Maximum recursion exceeded in _parse()\n");
 	return undef;
     }
 
+    # get a local copy of the MAGIC symbols for efficiency
+    ($magic1, $magic2) = @{ $self->{ MAGIC } };
+
+    # get a symbol table entry reference (an undefined $symbol causes 
+    # an anonymous array ref to be returned).  
+    $symtabent = $self->_symbol_entry($symbol);
+
+    # clear any existing symbol table entry; this doesn't affect caching,
+    # BTW because _parse() only gets called when reload is necessary
+    splice(@$symtabent, 0) if scalar @$symtabent;
+
+
+    #
+    # main parsing loop begineth here
+    #
+
+    READLINE: while (defined($line = $self->_get_line())) {
+
+	# look to see if there is a directive in the line
+	while ($line =~ /
+		(.*?)           # anything preceeding a directive
+		$magic1         # opening directive marker
+		\s*             # whitespace
+		(.*?)           # directive contents
+		\s*             # whitespace
+		(      
+		    ($magic2)   # closing directive marker
+		    (.*)        # rest of the line
+		)?              # directive may not be terminated
+		$               # EOL so it all gets eaten
+	    /x) {
+
 	
-    KEYWORD: {
-	
-	# END(BLOCK)? directive ignores everything
-	$ keyword =~ /^END(BLOCK)?$/i && do {
-	    $identifier = '';
-	    $params     = '';
-	    last KEYWORD;
-	};
+	    #
+	    # if the directive terminating symbol ($magic2) wasn't
+	    # found in the line then it suggests that the directive
+	    # continues onto the next line, so we append the next
+	    # line and try again.
+	    #
+	    unless ($4) {
+		# if we can't read another line, tack on the
+		# magic token to avoid a dangling directive
+		unless (defined($nextline = $self->_get_line())) {
+		    $nextline = $magic2;
+		    $self->_warn("Closing directive tag missing\n");
+		}
+		chomp($line);
+		# add a space and the next line
+		$line .= " $nextline";
+		next;
+	    }
 
-	# DEFINE directive expects parameters but no identifiers
-	$keyword =~ /^DEFINE$/i && do {
-	    $identifier = '';
-	    last KEYWORD;
-	};
-		
-	# INCLUDE/SUBST/BLOCK expect identifier and perhaps parameters
-	$keyword =~ /^(INCLUDE|SUBST|BLOCK)$/i && do {
-	    $params =~ /(\S+)\s*(.*)/;
-	    $identifier = $1;
-	    $params     = $2;
-	    last KEYWORD;
-	};
+	    #
+	    # at this point, we have a line that has a complete directive
+	    # ($2) enclosed within it, perhaps with leading ($1) and 
+	    # trailing ($5) text
+	    #
 
+	    # push any preceding text into the output list
+	    push(@$symtabent, $1) if defined $1;
 
-	# if the keyword isn't recognised, we assume it's a basic SUBST
-	$identifier = $keyword;
-	$keyword    = 'SUBST';
-    }
+	    # anything coming after the directive gets re-queued.
+	    # CHOMP can be set to remove straggling newlines 
+	    $self->_unget_line(
+		$self->{ CHOMP }
+		    ? (length $5 ? "$5\n" : "")
+		    : "$5\n"
+	    );
+	    $line = "";
 
-    # force identifier to lower case unless CASE sensitive
-    $identifier = lc $identifier unless $self->{ CASE };
+	    if (defined $2) {
+		# create a new Text::MetaText::Directive object
+    		my $directive = $DIRECTIVE->new($2);
 
-    # force keyword to upper case (always happens even if CASE sensitive)
-    $keyword = uc($keyword);
+		# check everything worked OK.  eval?  bletch!
+		unless (defined $directive) {
+		    $self->_error(
+			sprintf("Parse error at %s line %s:\n    %s\n",
+			    $self->{ INPUT }, $self->{ LINENO }, 
+			    eval "\$${DIRECTIVE}::ERROR"));
+		    return undef;
+		}
 
-    # save directive information into a directive object
-    $direct->{ KEYWORD }     = $keyword;
-    $direct->{ IDENTIFIER }  = $identifier || '';
+		#
+		# some specialist processing required depending on 
+		# $directive->{ KEYWORD }
+		#
 
+		# END(BLOCK|IF)? marks the end of a defined block
+		$directive->{ KEYWORD } =~ /^END(BLOCK|IF)?$/ && do {
 
-    if ($params) {
+		    # save a copy of the tag that ended this block
+		    # so that the calling method can check it 
+		    $self->{ ENDTAG } = $directive->{ KEYWORD };
 
-	# save original parameter string (tidied up slightly)
-	$direct->{ PARAMSTR } = $self->_tidy($params);
+		    # return the symbol table list
+		    return $symtabent;
+		};
 
-	# ...and also as a hash array for convenience
-	$tags = $self->_split_params($params);
+		# BLOCK directive defines a sub-block
+		$directive->{ KEYWORD } eq 'BLOCK' && do {
 
-	foreach (grep(/^$ctrlstr$/i, keys %$tags)) {
+		    # clear ENDTAG data
+		    $self->{ ENDTAG } = "";
 
-	    # control params are forced to upper case; normal params
-	    # are forced to lower case unless the $self->{ CASE }
-	    # case sensitivity flag is set.
+		    # parse the defined block and check sanity
+		    return undef 
+			unless $self->_parse($directive->{ IDENTIFIER },
+				$depth + 1);
 
-	    # extract the control parameter, forcing name to UPPER case
-	    $direct->{"\U$_"} = $tags->{ $_ };
-	    delete $tags->{ $_ };
-	}
+		    # test that the directive that terminated the block 
+		    # was END(BLOCK)?
+		    unless ($self->{ ENDTAG } =~ /^END(BLOCK)?$/) {
+			$self->_error(sprintf(
+			    "Parse error at %s line %s:\n    %s\n",
+			    $self->{ INPUT }, $self->{ LINENO }, 
+			    "ENDBLOCK expected."));
+			return undef;
+		    }
 
-	if ($self->{ CASE }) {
-	    # save tags into $direct, preserving case
-	    $direct->{ PARAMS } = $tags;
-	} 
-	else {
-	    # copy tags into $direct, forcing names to lower case
-	    foreach (keys %$tags) { 
-		    $direct->{ PARAMS }->{"\L$_"} = $tags->{ $_ }
-	    } 
-	}
-    }
+		    # if the 'PRINT' option was defined, we convert the
+		    # BLOCK directive to an INCLUDE and push it onto the 
+		    # symbol table so that it gets processed and a copy
+		    # of the BLOCK gets pushed to the output
 
+		    if (defined($directive->{ PRINT })) {
+			$directive->{ KEYWORD } = 'INCLUDE';
+			push(@$symtabent, $directive);
+		    }
 
-    # DEBUG code
-    if ($self->{ DEBUGLEVEL } & DBGPREP) {
-	$self->_DEBUG(DBGPREP, "Directive: %-10s  identifier: %s\n",
-	    $direct->{ KEYWORD },
-	    $direct->{ IDENTIFIER } || "<none>");
+		    # loop to avoid directive getting (re-)pushed below
+		    next;
+		};
 
-	foreach (@control, 'PARAMSTR') {
-	    $self->_DEBUG(DBGDATA, "  %s: %s\n", $_, $direct->{ $_ })
-		    if defined($direct->{ $_ });
-	}
+		# push the directive onto the symbol table list
+		push(@$symtabent, $directive);
 
-	foreach (keys %{ $direct->{ PARAMS } }) {
-	    # print param value, de-referencing if it's an array ref
-	    my $datastr = $direct->{ PARAMS }->{ $_ };
-	    $self->_DEBUG(DBGDATA, "  %s => $datastr\n", $_);
-	}
-    }
+	    } # if (defined($2))
 
-    # return directive object
-    $direct;
+	}  # while ($line =~ ...
+
+	# anything remaining in $line must be plain text
+	push(@$symtabent, $line) if length($line);
+
+    } # READLINE: while...
+
+    # return a reference to the 'compiled' symbol table entry
+    $symtabent;
 }
 
 
 
 #========================================================================
 #
-# _split_params($params)
+# _process($symbol, \%tags, $depth)
 #
-# Splits the parameter list, $params, into name=value pairs, building a 
-# hash array containing each pair.  Returns a reference to the hash array.
+# $symbol is a scalar holding the name of a known symbol or a reference 
+# to an array which contains the nodes for an anonymous symbol.  In the 
+# former case, the symbol is referenced from the symbol table by calling
+# $self->_symbol_entry($symbol).  In the latter case, the method simply 
+# iterates through the elements of the $symbol array reference.
+#
+# Each element in the symbol table entry array is expected to be a simple
+# scalar containing plain text or a MetaText directive - an instance of
+# the Text::MetaText::Directive class.  Plain text is pushed straight 
+# through to an output queue.  Directves are processed according to
+# their type (e.g. INCLUDE, DEFINE, SUBST, etc) and the resulting output
+# is pushed onto the output queue.
+#
+# The method returns a concatenation of the output list or undef on 
+# error.
 #
 #========================================================================
 
-sub _split_params {
+sub _process {
     my $self   = shift;
-    my $params = shift;
-    my %tags;
-    my ($name, $value);
+    my $symbol = shift;
+    my $tags   = shift || {};
+    my $depth  = shift || 1;
+    my ($symtabent, $directive, $item, $keyword, $space);
+    my ($ident);
+    my $proctext;
+
+    my @output = ();
 
 
-    $self->_DEBUG(DBGFUNC, "_split_params($params)\n");
+    $self->_DEBUG(DBGFUNC, "_process($symbol, $tags, $depth)\n");
 
 
-    # some simple definitions of elements we use in the regex
-    my $word     = q((\S+));         # a word
-    my $space    = q(\s*);           # optional space
-    my $quote    = q(");             # single or double quote characters
-    my $escape   = "\\\\";           # an escape \\ (both '\' escaped)
-    my $anyquote = "[$quote]";       # class for quote chars
-    my $equals   = "$space=$space";  # '=', with optional whitespace
-
-    # within a quoted phrase we might find escaped quotes, e.g. 
-    # name = "Andy \"Froth\" Wardley";  to detect this, we scan
-    # for sequences of legal characters (not quotes or escapes) up until
-    # the first quote or escape;  if we find an escape, we jump past the
-    # next character (possible a quote) and repeat the process, and repeat
-    # the process, and so on until we *don't* find an escape as the next 
-    # character;  that implies it's an unescaped quote and the string ends.
-    # (don't worry if that slipped you by - just think of it as magic)
-
-    my $okchars = "[^$quote$escape]*";
-    my $qphrase = "$anyquote ( $okchars ($escape.$okchars)* ) $anyquote";
-
-
-    # NOTE: our definitions above have embedded substrings ( ) so we need
-    # to be a little careful about counting backreferences accurately...
-
-    # split params and add to %newtags
-    while ($params =~ 
-	    /
-		$word $equals $qphrase    # $1 = $2    (NB: $2 contains $3)
-		|                         # e.g. (foo) = "(bar baz)"
-		$word $equals $word       # $4 = $5    
-		|                         # e.g. (foo) = (bar)
-		$qphrase                  # $6         (NB: $6 contains $7)
-		|                         # e.g. "(foo bar)"
-		$word                     # $8
-					  # e.g. (foo)
-	    /gxo) { # 'o' - compile regex once only
-
-	if ($6 or $8) {
-	    # if $6 or $8 is defined, we found a simple flag
-	    $name = defined($6) ? $6 : $8;
-	    $value = 0;
-	} 
-	else {
-	    # $6 and $8 undefined so use $1 = $2, or $4 = $5
-	    $name  = defined($1) ? $1 : $4;
-	    $value = defined($1) ? $2 : $5;
-	}
-
-	# check both name and value are defined
-	$value = "" unless defined $value;
-	next unless defined $name;
-
-	# un-escape escaped characters 
-	$value =~ s<\\(.)><$1>g;
-
-	# push tag onto tags list
-	$tags{ $name } = $value;
+    # check for excessive recursion
+    if ($depth > $self->{ MAXDEPTH }) {
+	$self->_error("Maximum recursion exceeded\n");
+	return undef;
     }
 
-    return \%tags;
+    # $symbol may be a reference to an anonymous block array...
+    if (ref($symbol) eq 'ARRAY') {
+	$symtabent = $symbol;
+    }
+    # ...or a named symbol which may or may not have been pre-parsed 
+    else { 
+	# check the symbol has an entry in the symbol table
+    	unless ($self->_symbol_defined($symbol)) {
+	    $self->_error("$symbol: no such block defined\n");
+	    return undef;
+	}
+	$symtabent = $self->_symbol_entry($symbol);
+    }
+
+
+    #
+    # The symbol table entry is an array reference passed explicitly in
+    # $symbol or retrieved by calling $self->_symbol_entry($symbol);
+    # Each element in the array can be either a plain text string or an
+    # instance of the $DIRECTIVE class.  The former represent 
+    # normal text blocks in the processed file, the latter represent 
+    # pre-parsed MetaText directives (see _parse()).  A directive will 
+    # contain some of the following elements, based on the directive type 
+    # and other data defined in the directive block:
+    #
+    #  $directive->{ KEYWORD }     # directive type: INCLUDE, DEFINE, etc
+    #  $directive->{ IDENTIFIER }  # KEYWORD target, i.e. INCLUDE <filename>
+    #  $directive->{ PARAMS }      # hash ref of variables defined
+    #  $directive->{ PARAMSTR }    # original parameter string
+    #  $directive->{ IF }          # an "if=..." conditional
+    #  $directive->{ UNLESS }      # ditto "unless=..."
+    #  $directive->{ DELIMITER }   # delimiter string (see _evaluate())
+    #  $directive->{ FILTER }      # print filter name and params
+    #  $directive->{ FORMAT }      # print format
+    # 
+
+    # process each each line from the block
+    foreach $item (@$symtabent) {
+
+	# get rid of the non-directive cases first...
+	# TODO: should check isa($item, $DIRECTIVE)
+	unless (ref($item) eq $DIRECTIVE) {
+
+	    # return content if we find the end-of-content marker 
+	    return join("", @output)
+		if $item =~ /^__(MT)?END__$/;
+
+	    # not a directive - so just push output and loop
+	    push(@output, $item);
+
+	    next;
+	}
+
+
+	# test any "if=<condition>" statement...
+	if ($item->{ IF }) {
+	    my $result = $self->_evaluate($item->{ IF }, $tags, 
+			$item->{ DELIMITER } || $self->{ DELIMITER });
+	    next unless defined($result) && $result > 0;
+	}
+
+	# ...and/or any "unless=<condition>" statement
+	if ($item->{ UNLESS }) {
+	    my $result = $self->_evaluate($item->{ UNLESS }, $tags, 
+			$item->{ DELIMITER } || $self->{ DELIMITER });
+	    next if defined($result) && $result != 0;
+	}
+
+	
+	# we take a copy of the KEYWORD (i.e. directive type) and 
+	# IDENTIFIER (i.e. directive operand)
+	$keyword = $item->{ KEYWORD };
+	$ident   = $item->{ IDENTIFIER };
+
+
+	#------------------------------------
+	# switch ($keyword) 
+	#
+
+	$keyword eq 'DEFINE' && do {
+
+	    # $tags is a hash array ref passed in to _process().  We must
+	    # clone it before modification in case we should accidentally 
+	    # update the caller's hash.
+	    $tags = { %$tags };
+
+	    # merge in parameters defined within the INCLUDE directive
+	    $self->_integrate_params($tags, $item->{ PARAMS });
+	
+	    next;
+	};
+
+	$keyword eq 'INCLUDE' && do {
+
+	    # an INCLUDE identifier is allowed to contain variable 
+	    # references which must be interpolated.
+	    $ident = $self->_interpolate($ident, $tags);
+
+	    # clone the existing tags 
+	    my $newtags = { %$tags };
+
+	    # merge in parameters defined within the INCLUDE directive
+	    $self->_integrate_params($newtags, $item->{ PARAMS });
+
+	    # process the INCLUDE'd symbol and check return 
+	    $proctext = $self->process_file($ident, $newtags, $depth + 1);
+	    return undef unless defined $proctext;
+
+	    # post-processed output and push onto output list
+	    push(@output, $self->_post_process($item, $proctext));
+
+	    next;
+	};
+
+	$keyword eq 'SUBST' && do {
+
+	    # call _substitute to handle token substitution
+	    $proctext = $self->_substitute($item, $tags);
+
+	    if (defined($proctext)) {
+		$proctext = $self->_post_process($item, $proctext);
+	    }
+	    else {
+		# unrecognised token
+	    	$self->_warn("Unrecognised token: $item->{ IDENTIFIER }\n")
+		    if defined $self->{ ROGUE }->{ WARN };
+
+	    	# resolve nothing if 'delete' is defined as a ROGUE option
+		$proctext = $self->{ ROGUE }->{ DELETE }
+		       ? ""
+		       :   $self->{ MAGIC }->[ 0 ]     # rebuild directive
+		         . " "
+		         . $item->{ PARAMSTR }
+		         . " "
+		         . $self->{ MAGIC }->[ 1 ];
+	    }
+
+	    push(@output, $proctext);
+
+	    next;
+	};
+
+	# default: invalid directive;  this shouldn't happen
+	$self->_warn("Unrecognise directive: $keyword\n")
+
+	#
+	# switch ($keyword)
+	#------------------------------------
+    }
+
+    # join output tokens and return as a single line
+    join("", @output);
+}
+
+
+
+#========================================================================
+# 
+# _get_line()
+#
+# Returns the next pending line of text to be processed from the input 
+# file or text string.  If there are no pending lines already in the 
+# queue, it reads a line of text from the file handle, $self->{ FILE }.  
+# If $self->{ FILE } is undefined, it looks at $self->{ TEXT }, splits 
+# the contents into lines and pushes them onto the pending line list.  
+# The next pending line in the list can then be returned.
+#
+# Return a string representing the next input line or undef if no further 
+# lines are available (at EOF for example).
+#
+#========================================================================
+
+sub _get_line {
+    my $self = shift;
+
+
+    $self->_DEBUG(DBGFUNC, "_get_line() (%s #%d)\n", 
+	$self->{ INPUT }, $self->{ LINENO } + 1);
+
+
+    # if there are no lines pending, we try to add some to the queue
+    unless (@{ $self->{ LINES } }) {
+
+	if (defined $self->{ FILE }) {
+	    # read from the file
+    	    push(@{ $self->{ LINES } }, $self->{ FILE }->getline());
+
+	    # close file if done
+	    $self->{ FILE } = undef if $self->{ FILE }->eof();
+	} 
+	elsif (defined $self->{ TEXT }) {
+	    # split from the text line
+	    push(@{ $self->{ LINES } }, split(/^/m, $self->{ TEXT }));
+	    $self->{ TEXT } = undef;
+	}
+
+	# no default
+    }
+
+    # LINENO is incremented to indicate that another line has been read,
+    # unless PUTBACK indicates that there are requeued lines.
+    if ($self->{ PUTBACK }) {
+	$self->{ PUTBACK }--;
+    }
+    else {
+	$self->{ LINENO }++;
+    }
+
+    # return the next token (may be undef to indicate end of stream)
+    return shift(@{ $self->{ LINES } });
+
+}
+
+
+
+#========================================================================
+# 
+# _unget_line($line)
+#
+# Unshifts the specified line, $line, onto the front of the pending
+# lines queue.  Does nothing if $line is undefined.  Effectively the 
+# complement of _get_line().  The PUTBACK variable variable is 
+# incremented.  The _get_line() method uses this as an indication that
+# the line is re-queued and decrements PUTBACK instead of incrementing
+# LINENO as per usual.
+# 
+#========================================================================
+
+sub _unget_line {
+    my $self = shift;
+    my $line = shift;
+
+
+    return unless defined $line;
+
+    my $safeline;
+    ($safeline = $line) =~ s/%/%%/g;
+    $self->_DEBUG(DBGFUNC, "_unget_line(\"$safeline\") (#%d)\n", 
+	    $self->{ LINENO } - 1);
+
+    # increment PUTBACK to indicate there are re-queued lines
+    $self->{ PUTBACK }++;
+
+    # unshift (defined) line onto front of list
+    unshift(@{ $self->{ LINES } }, $line);
 }
 
 
 
 #========================================================================
 #
-# _tidy($string)
+# _symbol_name($symbol)
 #
-# Tidies the specified string, $string, by compressing any whitespace 
-# outside of quotes.
+# Returns the name by which $symbol might be referenced in the symbol 
+# table.  Applies case folding (to lower case) unless CASE sensitivity
+# is set.
 #
 #========================================================================
 
-sub _tidy {
+sub _symbol_name {
     my $self   = shift;
-    my $string = shift;
-    my $newstr = "";
+    my $symbol = shift;
 
 
-    $self->_DEBUG(DBGFUNC, "_tidy($string)\n");
+    $self->_DEBUG(DBGFUNC, "_symbol_name($symbol)\n");
 
 
-    # see the comments in _split_params() explaining how this works
+    # convert symbol to lower case unless CASE sensitivity is set
+    $symbol = lc $symbol unless $self->{ CASE };
 
-    my $word     = q((\S+));         # a word
-    my $space    = q(\s*);           # optional space
-    my $quote    = q("');            # single or double quote characters
-    my $escape   = "\\\\";           # an escape \\ (both '\' escaped)
-    my $anyquote = "[$quote]";       # class for quote chars
-    my $equals   = "$space=$space";  # '=', with optional whitespace
+    return $symbol;
+}
 
-    my $okchars = "[^$quote$escape]*";
-    my $qphrase = "($anyquote $okchars ($escape.$okchars)* $anyquote)";
 
-    while ($string =~ / $qphrase | $word /gxo) {
-	$newstr .= " " if $newstr;
-	$newstr .= defined($1) ? $1 : $3;
+
+#========================================================================
+#
+# _symbol_defined($symbol)
+#
+# Returns 1 if the symbol, $symbol, is defined in the symbol table or 
+# 0 if not. 
+#
+#========================================================================
+
+sub _symbol_defined {
+    my $self   = shift;
+    my $symbol = shift;
+
+
+    $self->_DEBUG(DBGFUNC, "_symbol_defined($symbol)\n");
+
+
+    # call _symbol_name() to apply any name munging
+    $symbol = $self->_symbol_name($symbol);
+
+    # return 1 or 0 based on existence of symbol table entry
+    return exists $self->{ SYMTABLE }->{ $symbol } ? 1 : 0;
+}
+
+
+
+#========================================================================
+#
+# _symbol_entry($symbol)
+#
+# Returns a reference to the symbol table entry for $symbol.  If there
+# is no corresponding symbol currently loaded in the table, the symbol
+# table entry is initiated to an empty array reference, [], and that 
+# value is returned.  This list can then be filled, via the reference, 
+# to populate the symbol table entry.  The symbol name, $symbol, may be 
+# converted to lower case (via _symbol_name($symbol)) unless case 
+# sensitivity ($self->{ CASE }) is set.
+#
+# Returns a reference to the array that represents the symbol table 
+# entry for the specified entry.  
+#
+#========================================================================
+
+sub _symbol_entry {
+    my $self   = shift;
+    my $symbol = shift;
+
+
+    $self->_DEBUG(DBGFUNC, "_symbol_entry(%s)\n", 
+	    defined $symbol ? $symbol : "<undef>");
+
+
+    # an undefined symbol gets an anonymous array
+    return [] unless defined $symbol;
+
+    # determine the real symbol name accounting for case folding
+    $symbol = $self->_symbol_name($symbol);
+
+    # create empty table entry for a new symbol
+    $self->{ SYMTABLE }->{ $symbol } = []
+    	unless defined $self->{ SYMTABLE }->{ $symbol };
+
+    # return reference to symbol table entry
+    $self->{ SYMTABLE }->{ $symbol };
+}
+
+
+
+#========================================================================
+#
+# _variable_name($variable)
+#
+# Returns the name by which $symbol might be referenced.  Removes any
+# extraneous leading '$' and folds to lower case unless CASE sensitivity
+# is set.
+#
+# Returns the (perhaps modified) variable name.
+#
+#========================================================================
+
+sub _variable_name {
+    my $self     = shift;
+    my $variable = shift;
+
+
+    $self->_DEBUG(DBGFUNC, "_variable_name($variable)\n");
+
+
+    # strip leading '$'
+    $variable =~ s/^\$//;
+
+    # convert symbol to lower case unless CASE sensitivity is set
+    $variable = lc $variable unless $self->{ CASE };
+
+    return $variable;
+}
+
+
+
+#========================================================================
+#
+# _variable_value($variable, $tags)
+#
+# Returns the value associated with the variable as named in $variable.  
+# $variable may be modified (by _variable_name()) which removes any 
+# leading '$' and folding case unless $self->{ CASE } is set.  The 
+# resulting variable name is then used to index into $tags to return 
+# the associated value.
+#
+# Returns the value from $tags associated with $variable or undef if not
+# defined.
+#
+#========================================================================
+
+sub _variable_value {
+    my $self     = shift;
+    my $variable = shift;
+    my $tags     = shift;
+
+
+    $self->_DEBUG(DBGFUNC, "_variable_value($variable, $tags)\n");
+
+
+    # examine the CASEVARS which lists vars not for CASE folding
+    return $tags->{ $variable }
+	if (defined $self->{ CASEVARS }->{ $variable } 
+	    && defined $tags->{ $variable });
+
+    # special case(s)
+    return time() if $variable eq 'TIME';
+
+    # apply any case folding rules to the variable name 
+    $variable = $self->_variable_name($variable);
+
+    # return the associated value
+    return $tags->{ $variable };
+}
+
+
+
+#========================================================================
+#
+# _interpolate($expr, $tags)
+#
+# Examines the string expression, $expr, and attempts to replace any 
+# elements within the string that relate to key names in the hash table
+# referenced by $tags.  A simple "$variable" subsititution is identified 
+# when separated by non-word characters 
+#
+#   e.g.  "foo/$bar/baz" => "foo/" . $tags->{'bar'} . "/baz"
+#
+# Ambiguous variable names can be explicitly resolved using braces as per 
+# Unix shell syntax. 
+#
+#   e.g. "foo${bar}baz"  => "foo" . $tags{'bar'} . "baz"
+#
+# The function returns a newly constructed string.  If $expr is a reference
+# to a scalar, the original scalar is modified and also returned.
+#
+#========================================================================
+
+sub _interpolate {
+    my $self = shift;
+    my $expr = shift;
+    my $tags = shift || {};
+    my ($s1, $s2);
+
+
+    $self->_DEBUG(DBGFUNC, "_interpolate($expr, $tags)\n");
+
+
+    # if a reference is passed, work on the original, otherwise take a copy
+    my $work = ref($expr) eq 'SCALAR' ? $expr : \$expr;
+
+    # look for a "$identifier" or "${identifier}" and substitute
+    # Note that we save $1 and $2 because they may get trounced during
+    # the call to $self->_variable_value()
+    $$work =~ s/ ( \$ \{?  ([\w\.]+) \}? ) /
+		 ($s1, $s2) = ($1, $2);
+		 defined ($s2 = $self->_variable_value($2, $tags))
+		    ? $s2 
+		    : $s1;
+               /gex;
+
+    # return modified string
+    $$work;
+}
+
+
+
+#========================================================================
+#
+# _integrate_params($tags, $params, $lookup) 
+#
+# Attempts to incorporate all the variables in the $params hash array 
+# reference into the current tagset referenced by $tags.  Any embedded
+# variable references in the $params values will be interpolated using
+# the values in the $lookup hash.  If $lookup is undefined, the $tags 
+# hash is used.
+#
+# e.g. 
+#   if    $params->{'foo'} = 'aaa/$bar/bbb'  
+#   then  $tags->{'foo'}   = 'aaa' . $lookup->{'bar'} . 'bbb'
+#  
+#========================================================================
+
+sub _integrate_params {
+    my $self      = shift;
+    my $tags      = shift || {};
+    my $params    = shift || {};
+    my $lookup    = shift || $tags;
+    my ($v, $variable, $value);
+
+    
+    $self->_DEBUG(DBGFUNC, "_integrate_params($tags, $params, $lookup)\n");
+
+
+    # iterate through each variable in $params
+    foreach $v (keys %$params) {
+
+	# get the real variable name
+	$variable = $self->_variable_name($v);
+
+	# interpolate any variable values in the parameter value
+	$value = $self->_interpolate($params->{ $v }, $lookup);
+
+	# copy variable and value into new tagset
+	$tags->{ $variable } = $value
+    }
+}
+
+
+
+#========================================================================
+#
+# _substitute($directive, $tags)
+#
+# Examines the SUBST directive referenced by $directive and looks to 
+# see if the variable to which it refers ($directive->{ IDENTIFIER })
+# exists as a key in the hash table referenced by $tags.
+#
+# If a relevant hash entry does not exist and $self->{ EXECUTE } is set 
+# to a true value, _substitute attempts to run the directive name as a 
+# class method, allowing derived (sub) classes to define member functions 
+# that get called automagically by the base class.  If $self->{ EXECUTE } 
+# has a value > 1, it attempts to run a function in the main package with 
+# the same name as the identifier.  If all that fails, undef is returned.
+#
+#========================================================================
+
+sub _substitute {
+    my $self      = shift;
+    my $directive = shift;
+    my $tags      = shift;
+    my $ident     = $directive->{ IDENTIFIER };
+    my ($value, $fn);
+
+
+    $self->_DEBUG(DBGFUNC, "_substitute($directive, $tags)\n");
+
+
+    # get the variable value if it is defined
+    return $value 
+	if defined ($value = $self->_variable_value($ident, $tags));
+
+    # nothing more to do unless EXECUTE is true
+    return undef
+	unless $self->{ EXECUTE };
+
+    # extract the original parameter string
+    my $prmstr = $directive->{ PARAMSTR } || '';
+    my $prmhash = { };
+
+    # create a new set of directive tags, interpolating any embedded vars
+    $self->_integrate_params($prmhash, $directive->{ PARAMS }, $tags);
+
+    # execute $ident class method if EXECUTE is defined and $ident exists
+    if ($self->{ EXECUTE } && $self->can($ident)) {
+	$self->_DEBUG(DBGINFO, "executing $self->$ident\n");
+    	return $self->$ident($prmhash, $prmstr)
     }
 	
-    $newstr;
+    # if EXECUTE is set > 1, we try to run it as a function in the main 
+    # package.  We examine the main symbol table to see if the function
+    # exists, otherwise we return undef.
+
+    return undef unless $self->{ EXECUTE } > 1;
+
+    # get a function reference from the main symbol table
+    local *glob = $main::{ $ident };
+    return undef 
+	unless defined($fn = *glob{ CODE });
+
+    $self->_DEBUG(DBGINFO, "executing main::$ident\n");
+
+    # execute the function and implicitly return result
+    &{ $fn }($prmhash, $prmstr);
 }
 
 
@@ -971,6 +1297,16 @@ sub _tidy {
 #
 # Returns 1 if the expression evaluates true, 0 if it evaluates false.
 # On error (e.g. a badly formed expression), undef is returned.
+#
+# NOTE: This method is ugly, slow and buggy.  For most uses, it will do 
+# the job admirably, but don't necessarily trust it to do 100% what you
+# expect if your expressions start to get very complicated.  In 
+# particular, multiple nested parenthesis may not evaluate with the 
+# correct precedence, or indeed at all.  The method has to parse and
+# evaluate the $expr string every time it is run.  This will start to
+# slow your processing down if you do a lot of conditional tests.  In 
+# the future, it is likely to be compiled down to an intermediate form
+# to improve execution speed.
 #
 #========================================================================
 
@@ -1094,9 +1430,9 @@ sub _evaluate {
     $rhs = $op = '';
 
     if ($expr =~ /^\s*(.*?)\s*($compkeys)\s*(.*?)\s*$/) {
-    	$lhs  = $1 || $expr;
-       	$op   = $2 || '';
-    	$rhs  = $3 || '';
+    	$lhs  = $1;
+       	$op   = $2;
+    	$rhs  = $3;
 
 	$self->_DEBUG(DBGEVAL, "EVAL: compare: [$lhs] [$op] [$rhs]\n");
     }
@@ -1177,124 +1513,6 @@ sub _evaluate {
 
 #========================================================================
 #
-# _interpolate($expr, $tags)
-#
-# Examines the string expression, $expr, and attempts to replace any 
-# elements within the string that relate to key names in the hash table
-# referenced by $tags.  A simple "$variable" subsititution is identified 
-# when separated by non-word characters 
-#
-#   e.g.  "foo/$bar/baz" => "foo/" . $tags->{'bar'} . "/baz"
-#
-# Ambiguous variable names can be explicitly resolved using braces as per 
-# Unix shell syntax. 
-#
-#   e.g. "foo${bar}baz"  => "foo" . $tags{'bar'} . "baz"
-#
-# The function returns a newly constructed string.  If $expr is a reference
-# to a scalar, the original scalar is modified and also returned.
-#
-#========================================================================
-
-sub _interpolate {
-    my $self = shift;
-    my $expr = shift;
-    my $tags = shift || {};
-
-
-    $self->_DEBUG(DBGFUNC, "_interpolate($expr, $tags)\n");
-
-
-    # if a reference is passed, work on the original, otherwise take a copy
-    my $work = ref($expr) eq 'SCALAR' ? $expr : \$expr;
-
-    # look for a "$identifier" or "${identifier}" and substitute
-    $$work =~ s/(\$\{?(\w+)}?)/$tags->{ $2 } || $1/ge;
-
-    # return modified string
-    $$work;
-}
-
-
-
-#========================================================================
-#
-# _substitute($directive, $tags)
-#
-# Substitues the DIRECTIVE referenced by $directive with the corresponding
-# hash entry contents in $tags, if a relevant entry exists.  
-#
-# If a relevant hash entry does not exist and $self->{ EXECUTE } is set 
-# to a true value, _substitute attempts to run the directive name as a 
-# class method, allowing derived (sub) classes to define member functions 
-# that get called automagically by the base class.  If no such method
-# exists, AUTOLOAD gets called and, if $self->{ EXECUTE } has a value
-# > 1, it attempts to run a function in the main package with the same
-# name as the identifier.  If all that fails, undef is returned.
-#
-#========================================================================
-
-sub _substitute {
-    my $self      = shift;
-    my $directive = shift;
-    my $tags      = shift;
-
-
-    $self->_DEBUG(DBGFUNC, "_substitute($directive, $tags)\n");
-
-
-    # extract these handy values
-    my $ident     = $directive->{ IDENTIFIER } || return;
-    my $prmhash   = $directive->{ PARAMS }     || {};
-    my $prmstr    = $directive->{ PARAMSTR }   || '';
-
-
-    # first look for symbol in tags hash
-    if (defined($tags->{ $ident })) {
-
-	my $replace = $tags->{ $ident };
-	while ($replace =~ /\$/) {
-	    my $repnew = $self->_interpolate($replace, $tags);
-	    $self->_DEBUG(DBGINFO, "interpolating: $replace -> $repnew\n");
-
-	    # bomb out if tag can't be resolved (hasn't changed)
-	    last if $replace eq $repnew;
-
-	    $replace = $repnew;
-	}
-
-	if (ref($replace) eq 'CODE') {
-
-	    $self->_DEBUG(DBGINFO, "calling function: $ident($prmstr)\n");
-
-	    # call the substition function
-	    return &$replace($ident, $prmhash, $prmstr);   ## RETURN ##
-	} else {
-	    # replace with the substitution text
-	    return $replace;                               ## RETURN ##
-	}
-
-	# we never get here
-    }		
-
-    # convert keyword to lower case (unless CASE sensitive)
-    $ident = lc $ident unless $self->{ CASE };
-
-    # special case(s)
-    return time()
-	if ($ident eq ($self->{ CASE } ? 'TIME' : 'time'));
-
-    # if EXECUTE is defined, try to run it as a method and let AUTOLOAD 
-    # have a go at resolving it
-    $self->{ EXECUTE } 
-	? $self->$ident($prmhash, $prmstr)
-	: undef;
-}
-
-
-
-#========================================================================
-#
 # _post_process($directive, $string)
 #
 # This function is called to post-process the output generated when 
@@ -1302,7 +1520,7 @@ sub _substitute {
 # FORMAT parameters of the directive, $directive, are used to indicate 
 # the type of post-processing required. 
 #
-# Returns a the processed string.
+# Returns the processed string.
 #
 #========================================================================
 
@@ -1317,10 +1535,10 @@ sub _post_process {
     # DEBUG code
     if ($self->{ DEBUGLEVEL } & DBGFUNC) {
 	my $dbgline = $line;
-	$dbgline = substr($dbgline, 0, 16) . "..." 
-		if length($dbgline) > 16;
 	$dbgline =~ s/\n/\\n/g;
 	$dbgline =~ s/\t/\\t/g;
+	substr($dbgline, 0, 16) = "..." 
+		if length $dbgline > 16;
 	$dbgline = "\"$dbgline\"";
 	$self->_DEBUG(DBGFUNC, "_post_process($directive, $dbgline)\n");
     }
@@ -1466,19 +1684,39 @@ sub _dump_symbol {
 
 #========================================================================
 #
-# _warn($message, @params)
+# _warn(@_)
 #
 # Prints the specified warning message(s) using the warning function 
-# specified in $self->{ ERROR } or "printf STDERR", if not specified.
+# specified in $self->{ ERRORFN } or "print STDERR", if undefined.
 #
 #========================================================================
 
 sub _warn {
     my $self = shift;
 
-    return &{ $self->{ ERROR } }(@_) if defined($self->{ ERROR });
+    return &{ $self->{ ERRORFN } }(@_) if defined($self->{ ERRORFN });
 
-    printf(STDERR @_);
+    printf STDERR @_;
+}
+
+
+
+#========================================================================
+#
+# _error($message)
+#
+# Private error reporting method.  Sets internal ERROR value (which can 
+# be retrieved using the public method error(), and calls 
+# $self->_warn($message) to report the error.
+#
+#========================================================================
+
+sub _error {
+    my $self    = shift;
+    my $message = shift || "";
+
+    $self->{ ERROR } = $message;
+    $self->_warn($message);
 }
 
 
@@ -1501,7 +1739,7 @@ sub _DEBUG {
 
     return unless (($self->{ DEBUGLEVEL } & $level) == $level);
 
-    return &{ $self->{ DEBUG } }(@_) if defined($self->{ DEBUG });
+    return &{ $self->{ DEBUGFN } }(@_) if defined($self->{ DEBUGFN });
 
     # sprintf expects a scalar first, so "sprintf(@_)" doesn't work
     $output = sprintf(shift, @_);
@@ -1510,60 +1748,6 @@ sub _DEBUG {
     $output =~ s/^/D> /mg;
     print STDERR $output;
 }
-
-
-
-#========================================================================
-#
-# AUTOLOAD
-#
-# The AUTLOAD method is called when an object method can't be resolved.
-# One known instance when this happens is when an unresolved variable is
-# encountered in a SUBST.  If the EXECUTE configuration option is set 
-# true, the processs() method attempts to interpret the variable as a 
-# method name and call it.  If no such method exists, the AUTOLOAD method
-# will step in.  If EXECUTE is set to a value > 1, the AUTOLOAD method
-# then tries to execute a function in the main package with the same name.
-# If no such function exists, the AUTOLOAD will examine the ROGUE option
-# to determine the required action for unresolved (ROGUE) variables.
-#
-# The AUTOLOAD method, or any function it calls, is expected to return 
-# the appropriate substitution for the SUBST variable or undef to 
-# indicate failure or non-execution (i.e. when EXECUTE is not set > 1).
-# 
-# Writers of derived classes should take care when overloading the 
-# AUTOLOAD method so as not to break the EXECUTE chain.
-#
-#========================================================================
-
-sub AUTOLOAD {
-    my $self    = shift;
-    my $fn;
-
-
-    # ignore destructor
-    $AUTOLOAD =~ /::DESTROY$/ && return;
-
-    # remove the "Package::" prefix
-    $AUTOLOAD =~ s/.*:://;
-
-    # if EXECUTE is set > 1, we try to run it as a function in the main 
-    # package.  We examine the main symbol table to see if the function
-    # exists, otherwise we return undef.
-
-    return undef unless $self->{ EXECUTE } > 1;
-
-    # get a function reference from the main symbol table
-    local *glob = $main::{ $AUTOLOAD };
-    return undef 
-	unless defined($fn = *glob{ CODE });
-
-    $self->_DEBUG(DBGINFO, "AUTOLOAD executing main::$AUTOLOAD\n");
-
-    # execute the function and implicitly return result
-    &{ $fn }(@_);
-}
-
 
 
 
@@ -1578,12 +1762,19 @@ Text::MetaText - Perl extension implementing meta-language for processing
 =head1 SYNOPSIS
 
     use Text::MetaText;
-    my $mt = new Text::MetaText;
-    print $mt->process($filename, \%vardefs);
+
+    my $mt = Text::MetaText->new();
+
+    print $mt->process_file($filename, \%vardefs);
+
+    print $mt->process_text($textstring, \%vardefs);
 
 =head1 SUMMARY OF METATEXT DIRECTIVES
 
-    %% DEFINE variable=value %%   # define variable(s)
+    %% DEFINE 
+       variable1 = value          # define variable(s)
+       variable2 = "quoted value"  
+    %%
 
     %% SUBST variable  %%         # insert variable value
     %% variable %%                # short form of above
@@ -1596,14 +1787,15 @@ Text::MetaText - Perl extension implementing meta-language for processing
     %% INCLUDE filename  %%       # include external file 'filename'
 
     %% INCLUDE file_or_block      # a more complete example...
-       variable=value             # additional variable definition(s)
-       if=condition               # conditional inclusion
-       format=format_string       # printf-like format string with '%s'
-       filter=fltname(params)     # post-process filter 
+       variable = value           # additional variable definition(s)
+       if       = condition       # conditional inclusion
+       unless   = condition       # conditional exclusion
+       format   = format_string   # printf-like format string with '%s'
+       filter   = fltname(params) # post-process filter 
     %%
 
     %% TIME                       # current system time, as per time(2)
-       format=format_string       # display format, as per strftime(3C) 
+       format   = format_string   # display format, as per strftime(3C) 
     %%
 
 =head1 DESCRIPTION
@@ -1675,7 +1867,9 @@ document management and other similar tasks.
 
 MetaText requires Perl 5.004 or later.  The Date::Format module should
 also be installed.  This is available from CPAN (in the "TimeDate"
-distribution) as described in the following section.
+distribution) as described in the following section.  The B<metapage>
+utility also requires the File::Recurse module, distributed in the 
+"File-Tools" bundle, also available from CPAN.
 
 =head1 OBTAINING AND INSTALLING THE METATEXT MODULE
 
@@ -1713,7 +1907,7 @@ MetaText is distributed as a single gzipped tar archive file:
     Text-MetaText-<version>.tar.gz
 
 Note that "<version>" represents the current MetaText Revision number, 
-of the form "0.14".  See L<REVISION> below to determine the current 
+of the form "0.18".  See L<REVISION> below to determine the current 
 version number for Text::MetaText.
 
 Unpack the archive to create a MetaText installation directory:
@@ -1800,7 +1994,11 @@ identifiers case insensitively.   Thus, the following are treated
 identically:
 
     %% INCLUDE foo %%
+    %% INCLUDE Foo %%
     %% INCLUDE FOO %%
+
+When running with CASE sensitivity disabled, the MetaText processor 
+converts all variable and symbol names to lower case. 
 
 Setting the CASE option to any non-zero value causes the document to be 
 processed case sensitively.
@@ -1808,7 +2006,56 @@ processed case sensitively.
     my $mt = Text::MetaText->new( { CASE => 1 } ); # case sensitive
 
 Note that the configuration options described in this section are always 
-treated case insensitively regardless of the CASE setting.
+treated case insensitively regardless of the CASE setting.  
+
+=item CASEVARS
+
+When running in the default case-insensitive mode (CASE => 0), all variable 
+names are folded to lower case.  It is convenient to allow applications 
+to specify some variables that are upper or mixed case to distinguish them 
+from normal variables.  The metapage utility uses this to define a number of
+'system variables' that hold information about the file being processed:
+FILETIME, FILEMOD, FILEPATH, etc.  By defining these as CASEVARS, the 
+processor will attempt to differentiate them from normal variables by their
+case.  Thus, the calling application can define variables that are 
+guaranteed not to conflict with any user-defined variables (while CASE 
+insensitive) and are also effectively read-only.  
+
+    my $mt = Text::MetaText->new( { 
+        CASEVARS => [ 'AUTHOR', 'COPYRIGHT' ],
+    });
+
+    print $mt->process_file($file, {
+	AUTHOR    => 'Andy Wardley',
+	COPYRIGHT => '(C) Copyright Andy Wardley 1998',
+    });
+
+The input file:
+
+    %% DEFINE copyright = "(C) Ima Plagiarist" %%
+    %% COPYRIGHT %%
+    %% copyright %%
+
+produces the following output:
+
+    (C) Copyright Andy Wardley 1998        # COPYRIGHT
+    (C) Ima Plagiarist                     # copyright 
+
+Note that CASEVARS can only apply to variables that are pre-defined 
+(i.e. specified in the hash array that is be passed to process_xxxx()
+as a second parameter).  It is not possible to re-define a CASEVARS 
+variable with a DEFINE directive because the variable name will always
+be folded to lower case (when CASE == 0).  e.g.
+
+    %% DEFINE COPYRIGHT = "..." %% 
+
+is interpreted as:
+
+    %% DEFINE copyright = "..." %%
+
+It is recommended that such variables always be specified in UPPER CASE
+as a visual clue to indicate that they have a special meaning and
+behaviour.
 
 =item MAGIC
 
@@ -1960,7 +2207,7 @@ If the EXECUTE flag is set to any true value, the MetaText processor will
 interpret the variable as an object method and attempt to apply it to its
 own object instance (i.e. $self->$method(...)).  If the method is not 
 defined, the processor fails quietly (but see ROGUE below to see what can 
-happen next).  This allows classes to be derived from MetaText
+happens next).  This allows classes to be derived from MetaText
 that implement methods that can be called (when EXECUTE == 1) as follows:
 
     %% method1 ... %%       # calls $self->method1(...);
@@ -2004,7 +2251,7 @@ The following pseudo-code extract demonstrates this:
     print $mt->processs("myfile");
 
     sub foo { "This is function 'foo'" }  # simple return string
-    sub bar { "This is fucntion 'bar'" }  # "        "         "
+    sub bar { "This is function 'bar'" }  # "        "         "
 	
 which, for the file 'myfile':
 
@@ -2146,18 +2393,29 @@ set this confiuration item to a higher value.  e.g.
 
 =back 
 
-=head1 PROCESSING TEXT
+=head1 PROCESSING TEXT FILES AND STRINGS
 
-The MetaText process() method is called to process a file, 
-interpreting any MetaText directives embedded within it.  The first
-parameter should be the name of the file which  should reside in the
-current working directory or in one of the directories specified in
-the LIB configuration option.  A filename starting with a slash '/'
-is considered to be an absolute path.  The optional second parameter 
-may be a reference to a hash array containing a number of variable/value
-definitions that should be pre-defined when processing the file.
+The MetaText methods for processing text files and strings are:
 
-    print $mt->process("somefile", { name => "Fred" });
+    process_file($file, ...);
+    process_text($text, ...);
+
+The process() method is also supported for backward compatibility with 
+older versions of MetaText.  The process() method simply calls 
+process_file(), passing all arguments to it.
+
+The process_file() method processes a text file interpreting any MetaText 
+directives embedded within it.  The first parameter should be the name of 
+the file which  should reside in the current working directory or in one 
+of the directories specified in the LIB configuration option.  A filename 
+starting with a slash '/' or a period '.' is considered to be an absolute 
+path or a path relative to the current working directory, respectively.  
+In these cases, the LIB path is not searched.  The optional second 
+parameter may be a reference to a hash array containing a number of 
+variable/value definitions that should be pre-defined when processing 
+the file.
+
+    print $mt->process_file("somefile", { name => "Fred" });
 
 If "somefile" contains:
 
@@ -2173,17 +2431,19 @@ directive (described below) at the start of the INCLUDE file
     %% DEFINE name="Fred" %%
     Hello %% name %%
 
-The process() function will continue until it reaches the end of the file 
-or a line containing the pattern "__END__" by itself ("END" enclosed by 
-double underscores, no other characters or whitespace on the line).  
+The process_file() function will continue until it reaches the end of the 
+file or a line containing the pattern "__END__" or "__MTEND__" by itself 
+("END" or "MTEND" enclosed by double underscores, no other characters or 
+whitespace on the line).  
+
 Note that the pre-processor (a private method which is called by process(), 
-so feel free to forget all about it) I<does> scan past any __END__ marker.  
-In practice, that means you can define blocks I<after>, but use them 
-I<before>, the __END__ marker. e.g.
+so feel free to forget all about it) I<does> scan past any __END__ or 
+__MTEND__ marker.  In practice, that means you can define blocks I<after>, 
+but use them I<before>, the terminating  marker. e.g.
 
     Martin, %% INCLUDE taunt %%
 
-    __END__                 << processor stops here and ignores 
+    __MTEND__               << processor stops here and ignores 
                                everything following
     %% BLOCK taunt %%       << but the pre-processor has correctly 
     you Camper!                continued and parsed this block so that
@@ -2193,11 +2453,21 @@ produces the output:
 
     Martin, you Camper!
 
-The process() function returns a string containing the processed 
-file or block output.
+The process_file() function returns a string containing the processed 
+file or block output.  On error, a warning is generated (see L<ERROR>)
+and undef is returned.
 
-    my $output = $mt->process("myfile");
-    print $output;
+    my $output = $mt->process_file("myfile");
+    print $output if defined $output;
+
+The process_text() method is identical to process_file() except that the
+first parameter should represent a text string to be processed rather than
+the name of a file.  All other parameters, behaviour and return values are
+the same as for process_file().
+
+    my $text   = "%% INCLUDE header %% test! %% INCLUDE footer %%";
+    my $output = $mt->process_text($text);
+    print $output if defined $output;
 
 =head1 METATEXT DIRECTIVES
 
@@ -2273,12 +2543,38 @@ Multiple variables may be defined in a single DEFINE directive.
        quote = "that, when I waked, I cried to dream again."
     %%
 
-Variables defined within a file or passed to the process() function 
-as a hash array remain defined until the file or block is processed
-in entirety.  Variable values will be inherited by any nested files or 
-blocks INCLUDE'd into the file.  Re-definitions of existing variables will 
-persist within the file or block, masking any existing values, until the end
-of the file or block when the previous values will be restored.
+It is also possible to use other variable values to DEFINE new variables.
+Use the '$' prefix to indicate a variable rather than an absolute value.
+If necessary, surround the variable name with braces '{' '}' to separate
+it from any surrounding text.
+
+    %% DEFINE 
+       server = www.kfs.org
+       home   = /~abw/
+    %%
+
+    %% DEFINE
+       homepage = http://$server${home}index.html
+    %%
+
+In the above example, the 'homepage' variable adopts the value 
+'http://www.kfs.org/~abw/index.html' which is constructed from the text
+string 'http://' and 'index.html' and the values for $server and $home.  
+Notice how the 'home' variable is enclosed in braces.  Without these, the 
+homepage variable would not be constructed correctly, looking instead for 
+a variable called 'homeindex.html'
+
+    %% DEFINE
+       homepage = http://$server$homeindex.html   ## WRONG!
+    %%
+   
+Variables defined within a file or passed to the process_file() or 
+process_text() functions as a hash array remain defined until the file 
+or block is processed in entirety.  Variable values will be inherited by 
+any nested files or blocks INCLUDE'd into the file.  Re-definitions of 
+existing variables will persist within the file or block, masking any 
+existing values, until the end of the file or block when the previous 
+values will be restored.
 
 The following example illustrates this:
 
@@ -2296,7 +2592,7 @@ The following example illustrates this:
 
 Processing the file 'foo' as follows:
 
-    print $mt->process('foo', { 'name' => 'nobody' });
+    print $mt->process_file('foo', { 'name' => 'nobody' });
 
 produces the following output (with explanatory comments added for clarity):
 
@@ -2313,15 +2609,15 @@ is defined, its value will be inserted in place of the directive.
 
 Example:
 
-    %% DEFINE name=Jake %%
-    Hello %% SUBST name %%  
+    %% DEFINE place = World %%
+    Hello %% SUBST place %%!
 
 generates the following output:
 
-    Hello Jake
+    Hello World!
 
-The SUBST keyword can be omitted for brevity.  Thus "%% name %%" is
-processed identically to "%% SUBST name %%".
+The SUBST keyword can be omitted for brevity.  Thus "%% place %%" is
+processed identically to "%% SUBST place %%".
 
 If the variable is undefined, the MetaText processor will, according to the 
 value of the EXECUTE configuration value, try to execute a class method or a 
@@ -2383,13 +2679,13 @@ Additional variables may be defined for substitution within the file:
 The contents of the file "chapter2":
 
     <html><head><title>%%title%%</title></head>
-    <body bgcolor="%% bgcolor %">
+    <body bgcolor="%% bgcolor %%">
       ...
     </body>
 
 would produce the output:
 
-    <head><title>Chapter 2</title></head>
+    <html><head><title>Chapter 2</title></head>
     <body bgcolor="#ffffff">
       ...
     </body>
@@ -2608,9 +2904,10 @@ A BLOCK..ENDBLOCK definition may appear anywhere in the file.  It is
 in fact possible to INCLUDE the block before it has been defined as 
 long as the block definition resides in the same file.
 
-Processing of a file stops when it encounters the __END__ marker on a 
-line by itself.  Blocks can be defined after this marker even though 
-the contents of the file after __END__ are ignored by the processor.
+Processing of a file stops when it encounters an __END__ or __MTEND__
+marker on a line by itself.  Blocks can be defined after this marker even 
+though the contents of the file after the marker are ignored by the 
+processor.
 
     # include a block defined later
     %% INCLUDE greeting name=Prospero %%
@@ -2704,18 +3001,18 @@ functions that themselves can be called from within a document:
         $global_people->{ $params->{'id'} } || 'nobody';
     }
 
-Please note that the functionality provided by the EXECUTE option, and 
-inherently, the extensibility possible by deriving MetaText sub-classes, 
-relies in part on the operation of the AUTOLOAD method.  Authors of derived
-MetaText classes should be aware of, and account for this, if re-defining 
-the AUTOLOAD method.
-
 =head1 WARNINGS AND ERRORS 
 
 The following list indicates warning or error messages that MetaText can
 generate and their associated meanings.
 
 =over 4
+
+=item "CASEVARS option expects an array reference"
+
+The configuration hash array passed to Text::MetaText->new() contained
+a CASEVARS entry that did not contain an array reference.  See 
+L<USING THE METATEXT MODULE>.
 
 =item "Closing directive tag missing in %s"
 
@@ -2740,7 +3037,7 @@ DEBUG sections for more details.
 A token was specified for the DEBUGLEVEL configuration item which was 
 invalid.  See the DEBUGLEVEL section for a complete list of valid tokens.
 
-=item "Invalid roque option: %s" 
+=item "Invalid rogue option: %s" 
 
 A token was specified for the ROGUE configuration item which was 
 invalid.  See the ROGUE section for a complete list of valid tokens.
@@ -2755,6 +3052,12 @@ avoid this problem, or check your files for circular dependencies.
 
 A MetaText directive was identified that had no keyword or other content.
 e.g. C<%%    %%>
+
+=item "Parse error at %s line %s: %s"
+
+The pre-processor was unable to correctly parse a block or file.  The
+error message reports the file name and line number (or 'text string' 
+in the case of parse_text()) and the specific error details.
 
 =item "Text::MetaText->new expects a hash array reference"
 
@@ -2785,6 +3088,11 @@ e.g. C<%% INCLUDE foobar if="(foo && bar || baz" %%>
 An INCLUDE or SUBST directive included a "filter" option that refers
 to a non-existant filter.  e.g. C<%% INCLUDE foo filter=nosuchfilter() %%>
 
+=item "%s: no such block defined"
+
+The _process($symbol) method could not process the named symbol because it
+was not defined in the symbol table.  
+
 =back
 
 =head1 AUTHOR
@@ -2794,15 +3102,15 @@ Andy Wardley E<lt>abw@kfs.orgE<gt>
 See also:
 
     http://www.kfs.org/~abw/
-    http://www.kfs.org/~abw/perl/metatext/
 
 My thanks extend to the people who have used and tested MetaText.
 In particular, the members of the Peritas Online team; Simon Matthews, 
 Simon Millns and Gareth Scott; who brutally tested the software over a 
 period of many months and provided valuable feedback, ideas and of course, 
-bug reports.  I am also indebted to the members of the SAS Team at Canon 
-Research Centre Europe Ltd; Tim O'Donoghue, Neil Bowers, Ave Wrigley, Martin
-Portman, Channing Walton and Gareth Rees; although I'm not yet sure why.  :-)
+bug reports.  Deep respect is also due to the members of the SAS Team at Canon 
+Research Centre Europe Ltd; Tim "TimNix" O'Donoghue, Neil "NeilOS" Bowers, 
+Ave "AveSki" Wrigley, Martin "MarTeX" Portman, Channing "Chango" Walton and 
+Gareth "Gazola" Rees.  Don't go changing now...  :-)
 
 I welcome bug reports, enhancement suggestions, comments, criticisms 
 (hopefully constructive) and patches related to MetaText.  I would 
@@ -2815,20 +3123,50 @@ suitability for any purpose whatsoever.  That doesn't mean it doesn't do
 anything good, but just that I don't want some scrupulous old git to sue me 
 because they thought I implied it did something it doesn't.  I<E<lt>sighE<gt>>
 
+Text::MetaText is based on a template processing language I developed while 
+working at Peritas Ltd.  I am indebted to Peritas for allowing me to use this 
+work as the basis for MetaText and to release it to the public domain.  I am
+also pleased to note that Canon Research Centre Europe supports the Perl 
+community and the Free Software ideology in general. 
+
 =head1 REVISION
 
-$Revision: 0.15 $
+$Revision: 0.19 $
 
 =head1 COPYRIGHT
 
 Copyright (c) 1996-1998 Andy Wardley.  All Rights Reserved.
 
-This program is free software; you can redistribute it and/or 
-modify it under the same terms as Perl itself.
+This program is free software; you can redistribute it and/or modify it 
+under the terms of the Perl Artistic License.
 
 =head1 SEE ALSO
 
-The B<metapage> utility, the Date::Format module.
+For more information, see the accompanying documentation and support
+files:
+
+    README    Text based version of this module documentation.
+    Changes   Somewhat verbose list of per-version changes.
+    Todo      Known bugs and possible future enhancements.
+    Features  A summary of MetaText features and brief comparison to 
+              other perl 'template' modules.
+
+For information about the B<metapage> utility, consult the specific
+documentation:
+
+    perldoc metapage
+  or 
+    man metapage
+    
+For more information about the author and other Perl development work:
+
+    http://www.kfs.org/~abw/
+    http://www.kfs.org/~abw/perl/
+    http://www.cre.canon.co.uk/perl/
+
+For more information about Perl in general:
+
+    http://www.perl.com/
 
 =cut
 

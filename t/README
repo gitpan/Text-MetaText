@@ -1,5 +1,6 @@
 This directory contains the MetaText test scripts (*.t):
-  ./basic.t     Test basic directives such as %% DEFINE %% and %% SUBST %% 
+  ./subst.t     Test SUBST directive
+  ./define.t    Test DEFINE directive
 
 Other files:
   ./test.pl     Common file for all test scripts.

@@ -8,6 +8,7 @@ USAGE
         -v   verbose mode
         -q   quiet mode - shut up about missing files
         -d   debug mode 
+        -n   non-execute mode 
         -r   recurse into sub-directories
         -a   make all files (implicit -r)
         -f   force pages to be rebuilt even if source is not modified
@@ -19,8 +20,8 @@ DESCRIPTION
     The metapage utility uses the Text::MetaText module to process
     files. It acts like the Unix make(1S) utility, traversing a
     document tree and attempting to determine which files have been
-    updated (by comparing the date stamp of the source file with
-    it's corresponding processed destination file). Files that are
+    updated (by comparing the date stamp of the source file with its
+    corresponding processed destination file). Files that are
     identified in this way, or explicitly specified by name or by
     using the `-f' (force) flag, are processed using a
     Text::MetaText object and the resulting output is written to
@@ -67,6 +68,14 @@ CONFIGURATION
         cgibin      = /cgi-bin
         home        = /index.html
         abw         = "Andy Wardley"
+
+    Note that quoted values, such as that in the last line of the
+    example above, will have the surrounding quotes removed (the
+    same applies for single quotes "'"). It is not obligatory to
+    quote values with embedded whitespace in this manner as the
+    parser will treat the entire line after the '=' as the
+    configuration value (apart from any extraneous whitespace after
+    the '=' or at the end of line).
 
     The configuration blocks and their associated values are as
     follows:
@@ -187,7 +196,7 @@ CONFIGURATION
         case    = 1
         chomp   = 1
         execute = 2
-        rogue = warn,delete
+        rogue   = warn,delete
 
   DEFINE
 
@@ -219,10 +228,11 @@ CONFIGURATION
         </a>
 
     Note that it is possible to embed variable names (prefixed by
-    '$') within variable definitions. These are then evaluated by
-    Text::MetaText during substitution. Variables that are not
-    explicitly separated from other text by non-word characters can
-    be enclosed in braces to disambiguate them.
+    '$') within variable definitions. These are then pre-expanded by
+    metapage before being passed to Text::MetaText for the
+    processing phase. Variables that are not explicitly separated
+    from other text by non-word characters can be enclosed in braces
+    to disambiguate them.
 
     Examples:
 
@@ -261,6 +271,14 @@ COMMAND LINE OPTIONS
         the Text::MetaText module and also to trace any formatting
         problems that may be caused by an incorrect directive in the
         source text.
+
+    -n (No Execution Mode)
+        In no execution mode, metapage examines the source tree to
+        determine which files should be processed but does not
+        actually process them. Verbose mode (-v) is automatically
+        set to print the file names and summary statistics. This is
+        equivalent to the non-execute mode (also -n) of the make(1S)
+        utility.
 
     -r (Recurse)
         With the recurse option specified, it is possible to name a
@@ -315,7 +333,8 @@ COMMAND LINE OPTIONS
     Example:
 
         metapage -vaf @abw @kfs  # force (-f) process all files (-a) verbosely
-                                 # (-v) using profiles 'abw' and 'kfs'
+                                 # (-v) using profiles 'abw' and 'kfs' (as well
+                                 # as .metapagerc and any default profile)
 
   PRE-DEFINED VARIABLES
 
@@ -334,16 +353,21 @@ COMMAND LINE OPTIONS
 
        File last modified: %% FILETIME format="%d-%b-%y" %%
 
-    Note that the CASE configuration option for Text::MetaText is
-    disabled by default and as such, both `FILETIME' and `filetime'
-    refer to the same variable. If case sensitivity is enabled (see
-    the CONFIG manpage above) then the variable name should be
-    specified in UPPER CASE. The following variables are set for
-    each file metapage processes:
+    Note that the FILETIME and other variables listed below should
+    always be specified in UPPER CASE, even when case sensitivity is
+    disabled (CASE == 0), as it is by default. Metapage uses the
+    CASEVARS configuration item of Text::MetaText to identify these
+    variables as special case-sensitive system variables. They
+    cannot be re-defined (i.e. they're read-only) and should not
+    conflict with any other user-defined variables of the same name
+    (i.e. 'FILETIME' is entirely separate from some other 'filetime'
+    variable). This behaviour only applies to the variables listed
+    below. The following variables are set for each file metapage
+    processes:
 
     FILEPATH
         The path (directory) of the current file relative to the
-        source direcrtory. e.g. "/home"
+        source directory. e.g. "graphics/index.html"
 
     FILENAME
         The name of the file being processed. e.g. "index.html"
@@ -372,12 +396,12 @@ AUTHOR
     (`perldoc Text::MetaText') for more information on MetaText.
 
 REVISION
-    $Revision: 1.5 $
+    $Revision: 1.10 $
 
 COPYRIGHT
     Copyright (c) 1996-1998 Andy Wardley. All Rights Reserved. This
     program is free software; you can redistribute it and/or modify
-    it under the same terms as Perl itself.
+    it under the terms of the Perl Artistic Licence.
 
 SEE ALSO
     The Text::MetaText module.

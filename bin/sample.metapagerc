@@ -54,7 +54,7 @@ default     = abw
 
 [config]
 delimiter   = ,
-debuglevel  = info,process,data
+#debuglevel  = info,process,data
 
 
 #------------------------------------------------------------------------

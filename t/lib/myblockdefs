@@ -1,0 +1,8 @@
+%% BLOCK title_block %%
+This is the title block: %% title %%
+%% ENDBLOCK %%
+
+
+%% BLOCK footer_block %%
+This is the footer block: %% TIME format="%d-%b-%y" %%
+%% ENDBLOCK %%

@@ -1,6 +1,7 @@
-#
-# This file tests the DEFINE directive
-#
+# this tests simple variable definition and substitution, in particular
+# testing the DEFINE directive.
+# Expected text is shown in (parenthesis).
+
 
 # single value definition
 
@@ -19,15 +20,6 @@ pre-directive MetaText post-directive
 pre MetaText mid MetaText post
 --
 MetaText
-==
-
-# multiple value definition
-
-one=1  two=2
 --
-
-one=1  two=2  three=3  four=4  
+MetaText
 ==
-
-# check that an explicit SUBST works
-one=1  three=3

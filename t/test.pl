@@ -14,7 +14,6 @@ my $ERROR   = "";
 my $DEBUG   = 0;
 
 
-
 sub init {
     unless (-d $DESTDIR) {
 	mkdir $DESTDIR, 0755 || die "$DESTDIR: $!\n";
@@ -23,11 +22,35 @@ sub init {
 }
 
 
+# a post-processing function hook to allow the calling function to 
+# do something after the file has been processed, but before checking.
+# The function should return 0 to indicate success or return an error 
+# string to indicate failure.  
+my $post_hook;
+
+sub set_post_hook {
+    my $fn = shift;
+
+    if (defined($fn) && ref($fn) eq 'CODE') {
+	$post_hook = $fn;
+    }
+    else {
+    	warn "post_hook is not a CODE reference\n"
+    }
+}
+
+
+
+
 #
 # test_file($ntest, $mt, $file, $defs)
 #
-# Simply calls process() and compare() in turn.  Prints "ok $ntest" on 
-# success or "not ok $ntest" on error;
+# Calls process() to process the file, $file, with the MetaText object, 
+# $mt.  If $post_hook is defined, the function that it references is called,
+# passing the MetaText object, and the output file, &$post_hook($mt, $file).
+# Finally, compare() is called to check the file output (dest/$file) with 
+# the expected output (expect/$file).  Prints "ok $ntest" on success or 
+# "not ok $ntest" on error;
 #
 
 sub test_file {
@@ -35,14 +58,22 @@ sub test_file {
     my $mt    = shift;
     my $file  = shift;
     my $defs  = shift || {};
-    my $score;
-    
-    ($score = process($mt, $file, $defs)) == 0 and $score = compare($file);
-    print $score ? "not ok $ntest\n" : "ok $ntest\n";
-   
-    &log_entry("$file: %s\n", $score ? "FAILED - $ERROR" : "ok");
+    my $ok;
 
-    print STDERR $score ? "not ok $ntest [$ERROR]\n" : "ok $ntest\n" if $DEBUG;
+    print STDERR "$file...";
+    
+    if ($ok = process($mt, $file, $defs)) {
+	if (defined $post_hook) {
+	    $ERROR = &$post_hook($mt, $file);
+	    $ok = 0 if $ERROR;   
+	}
+	$ok = compare($file) if $ok;
+    }
+    print $ok ? "ok $ntest\n" : "not ok $ntest\n";
+   
+    &log_entry("$file: %s\n", $ok ? "ok" : "FAILED - $ERROR");
+
+    print STDERR $ok ? "ok $ntest\n" : "not ok $ntest [$ERROR]\n" if $DEBUG;
 }
 
 
@@ -54,30 +85,34 @@ sub test_file {
 # definitions in the hash array reference, $defs.  The output is written
 # to a corresponding file in the "dest" directory.
 #
-# Returns 0 on success.  -1 is returned on error and $ERROR is set to contain
-# an appropriate error message.
+# Returns 1 on success.  0 is returned on error and $ERROR is set to 
+# contain an appropriate error message.
 #
 
 sub process {
     my $mt   = shift;
     my $file = shift;
     my $vars = shift || {};
+    my $output;
     local (*OUTPUT);
 
     $ERROR = '';
 
     # process file 
-    my @output = $mt->process("$SRCDIR/$file", $vars);
+    unless (defined ($output = $mt->process("$SRCDIR/$file", $vars))) {
+	$ERROR = "No MetaText output\n";
+	return 0;
+    }
 
     # spit out processed text 
     open(OUTPUT, "> $DESTDIR/$file") || do {
 	$ERROR = "$DESTDIR/$file: $!";
-	return -1;
+	return 0;
     };
-    print OUTPUT join("", @output);
+    print OUTPUT $output;
     close(OUTPUT);
 
-    0;
+    1;
 }
 
 
@@ -85,8 +120,8 @@ sub process {
 #
 # compare($file)
 #
-# Compares the file ./expected/$file against ./dest/$file, returning 0
-# if they are identical or -1 if not.  $ERROR is set with an appropriate
+# Compares the file ./expected/$file against ./dest/$file, returning 1
+# if they are identical or 0 if not.  $ERROR is set with an appropriate
 # message if the files are not identical or another error occurs.
 #
 
@@ -100,21 +135,15 @@ sub compare {
 
     $ERROR = '';
 
-
     # attempt to open files
     foreach ([ $expfile, *EXP ], [ $destfile, *DEST ]) {
 	open ($_->[1], $_->[0]) || do { 
 	    $ERROR = "$_->[0]: $!";
-	    return -1;
+	    return 0;
 	}
     }
 
     while (defined($exp = <EXP>)) {
-	# dest may be shorter than expected
-	defined($dest = <DEST>) || do {
-	    $ERROR = "$destfile ends at line $.";
-	    return -1;
-	};
 
 	# "#pragma ignore" tells the checker to ignore any 
 	# subsequent lines up to the next "#pragma"
@@ -122,12 +151,20 @@ sub compare {
 	    $ignore = 1;
 	    next;
 	};
+
+	# and "#pragma check" tells it to start checking again
 	$ignore && ($exp =~ /^#pragma\s+check/) && do {
 	    $ignore = 0;
 	    next;
 	};
-	next if ($ignore);
 
+	# dest may be shorter than expected
+	defined($dest = <DEST>) || do {
+	    $ERROR = "$destfile ends at line $.";
+	    return 0;
+	};
+
+	next if ($ignore);
 
 	# dest line may be different than expected
 	unless ($exp eq $dest) {
@@ -137,14 +174,14 @@ sub compare {
 	    $ERROR = "files $expfile and $destfile differ at line $.\n" 
 		. "  expected: [$exp]\n"
 		. "       got: [$dest]";
-	    return -1;
+	    return 0;
 	}
     }
 
     # dest file may be longer than expected
     unless(eof DEST) {
 	$ERROR = "$destfile is longer than $expfile";
-	return -1;
+	return 0;
     }
 
 
@@ -152,7 +189,7 @@ sub compare {
     close(EXP);
     close(DEST);
 
-    0;
+    1;
 }
 
 
