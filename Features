@@ -2,7 +2,7 @@
 #
 # Text::MetaText 
 #
-#   Version 0.19
+#   Version 0.22
 # 
 #   Copyright (C) 1996-1998 Andy Wardley <abw@kfs.org>.  
 #   All Rights Reserved.
@@ -194,6 +194,9 @@ safe and restricted manner.
   a significant performance boost, particularly when processing multiple 
   files or when using a persitant MetaText object (as you might with 
   mod_perl, for example).
+
+* the content of blocks can be pre-declared by a calling script (i.e. 
+  pre-caching).
 
 * Complex conditional statements can be specified in INCLUDE directives
   to specify (at 'run-time') if the file or block should be included or

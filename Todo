@@ -2,7 +2,7 @@
 #
 # Text::MetaText 
 #
-#   Version 0.19
+#   Version 0.22
 # 
 #   Copyright (C) 1996-1998 Andy Wardley <abw@kfs.org>.  
 #   All Rights Reserved.
@@ -108,6 +108,9 @@
 * Have failed INCLUDE directives warn/delete/rebuild directive like 
   SUBST does.
 
+* Add "blockformat" parameter for formatting a block without splitting
+  into lines and subsequently rejoining.
+
 
 #------------------------------------------------------------------------
 # VARIABLES AND CASE HANDLING
@@ -115,6 +118,9 @@
 
 * System variables, such as "ELEMENT_NAME" that are set before, and cleared
   after process().  Currently, the only "system variable" is "TIME".
+
+* Have a default (or user-defined) namespace which is searched for 
+  variables as another SUBST option (as per EXECUTE).
 
 
 #------------------------------------------------------------------------
@@ -125,15 +131,13 @@
   process() variable hash) variables that resolve to code blocks 
   execute the code block in substitution.
 
-* ditto that SUBST can now include variable parameters that get correctly
-  evaluated.
-
 * add a "tutorial" section to the docs, covering metapage in particular
 
 * Update documentation to reflect any other new changes not listed above
   (there must be some kicking about)
 
 * Add sections describing the use of ERROR and DEBUG.
+
 
 
 #------------------------------------------------------------------------
@@ -190,10 +194,22 @@
     CANCEL     - stop the request and return an empty result
     ERROR      - an error occurred.
 
+* Add a Directive type, NULLOP, which is guaranteed to to nothing.  It
+  escapes me at the moment why I wanted this, but it was going to be useful 
+  for something or other.
+
 * process_file() and process_text() currently return undef if the process
   fails.  This should be configurable (STRICT?) to allow the much simpler
   "print $mt->process_file(...)" rather than having to explicitly check
   the return value for undef before printing.
+
+
+#------------------------------------------------------------------------
+# ASSOCIATED PACKAGES
+#------------------------------------------------------------------------
+
+* Test ($ERROR) reporting in base class works effectively in derived
+  classes.
 
 
 #------------------------------------------------------------------------
@@ -255,6 +271,9 @@
 * Add a 'copy' option to config [file] block which specified a file pattern
   for files to be copied rather than processed.
 
+* Implement the core metapage functionality as a module.  
+  
+
 
 #------------------------------------------------------------------------
 # INSTANTIATION AND CONFIGURATION
@@ -280,6 +299,8 @@
   a nullop constant function (e.g. \*DEBUG = \&NULLOP;) which would 
   avoid the overhead of calling the DEBUG function and evaluating the 
   DEBUGLEVEL when DEBUG is turned off.  
+
+* The sprintf in the DEBUG method gets confused by embedded '%' (line ~1507)
 
 * It would be convenient for DEBUG and ERROR (and anthing else) to be
   shared between Text::MetaText and Text::MetaText::Directive, rather

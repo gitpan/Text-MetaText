@@ -2,7 +2,7 @@
 #
 # Text::MetaText 
 #
-#   Version 0.19
+#   Version 0.22
 # 
 #   Copyright (C) 1996-1998 Andy Wardley <abw@kfs.org>.  
 #   All Rights Reserved.
@@ -472,7 +472,7 @@
 
 
 #------------------------------------------------------------------------
-# Version 0.19    Date:
+# Version 0.19    Date: 1998/04/02 09:25:16
 #------------------------------------------------------------------------
 
 * Rationalised error handling and added an internal ERROR variable to store
@@ -497,3 +497,113 @@
     Text::MetaText::Directive  v0.02
     metapage                   v1.11
   
+
+#------------------------------------------------------------------------
+# Version 0.20    Date: 1998/04/07 16:14:51
+#------------------------------------------------------------------------
+
+* Fixed bug in _post_process() which was incorrectly treating an input of
+  '0' as an undefined value and converting to ''.
+
+* Added the public declare($input, $name) method which allows text strings 
+  to be pre-parsed into the symbol table.  The method also allows $input to 
+  be a reference to an array which can contain text strings or MetaText 
+  Directive references as its elements.  This is effectively the 'compiled'
+  or 'parsed' version of an input.  There is currently no way to cleanly
+  create Directives for this, so using this form of declare() requires
+  a little black magic until I get around to sorting out the Directive
+  class.  The people who want to use it already know how to do it so they
+  should be happy.
+
+* Added test for declare() method.
+
+* Minor documentation updates.
+
+
+#------------------------------------------------------------------------
+# Version 0.21    Date: 1998/04/28 15:31:56
+#------------------------------------------------------------------------
+
+* Added a MetaText Factory object (Text::MetaText::Factory) which is 
+  responsible for parsing and creating directives.  This abstracts some
+  of the code that was previously in Directive into an object which can 
+  better manage the process (by trapping errors, for example).  It makes
+  the MetaText module more configurable by allowing the Factory and 
+  Directive classes to be sub-classed and bound into MetaText at run time.
+
+* Removed parsing code from Directive class (Text::MetaText::Directive).
+  The Directive class is now a simple data container serving as a suitable
+  base class for derivation.
+
+* Added a FACTORY configuration option to _configure() which allows a 
+  Factory instance to be bound in at run time.  
+
+* Added the _factory() method to return a reference to the internal 
+  Factory instance.  If a Factory is _not_ bound at run time via the
+  configuration option, FACTORY, then a default Factory object 
+  (Text::MetaText::Factory) is created and stored the first time a 
+  _factory() method call is made.
+
+* Changed directive KEYWORD member to TYPE to better describe what it
+  actually is.  Modified _parse() and _process() accordingly.
+
+
+#------------------------------------------------------------------------
+# Version 0.22    Date: 1998/09/01 11:23:14
+#------------------------------------------------------------------------
+
+* Added 4 pre-defined formats: dquoted, squoted, quoted (same as dquoted) 
+  and money.  These are specified as such: %% whatshesaid format=quoted %%.
+
+* Added _parse_error() method which adds file/line reporting to the error
+  message passed.
+
+* Removed all trailing newlines from error messages.  One is subsequently
+  printed by the _warn() function but the message is stored without it.
+
+* Added HAS_CONDITION and HAS_POSTPROC parameters to the Directive (added
+  in the Directive constructor) that are used within _process() to 
+  optimise the cases where conditionals and/or post-process formatting 
+  aren't required.
+
+* Doing the above tickled a well-hidden bug.  It seems that CHOMP wasn't
+  doing exactly what it should in removing empty lines after directives.
+  However, the _post_process() method was effectively reversing this
+  process by chomping off the final newline.  When _post_process() 
+  became optional, the bug showed itself and was duly whacked across the
+  head with a large stick.
+
+* Added TRIM configuration and directive parameters which follow a better
+  heuristic for cleaning up extraneous newlines surrounding a BLOCK
+  definition.  The CHOMP and TRIM behaviour really needs to be rationalised
+  further.
+
+* In implementing the above, I changed the way in which "control" 
+  parameters are listed internally for various directives.  It is now
+  possible to specify control params on a per-directive basis rather
+  than the previous all-or-nothing approach.  This should make it easier 
+  to extend the parameters for a specific directive without affecting the 
+  others.
+
+* Heavily updated the existing test suite and added a few more tests to 
+  reflect the changes to CHOMP and TRIM.
+
+* Fixed a bug in _process() which was causing the condition "if=0" to 
+  return a false positive.
+
+* Documented TRIM option and pre-defined format types: quoted, dquoted,
+  squoted.  
+
+* Documented declare() method and added "VARIABLE INTERPOLATION" section.
+
+* Added the File::Recurse module to Makefile.PL as a pre-requisite for 
+  metapage.
+
+* Third public beta release consisting of:
+   
+    Text::MetaText             v0.22
+    Text::MetaText::Directive  v0.04
+    Text::MetaText::Factory    v0.02
+    metapage                   v1.11
+  
+

@@ -275,10 +275,10 @@ COMMAND LINE OPTIONS
     -n (No Execution Mode)
         In no execution mode, metapage examines the source tree to
         determine which files should be processed but does not
-        actually process them. Verbose mode (-v) is automatically
+        actually process them. Verbose mode (`-v') is automatically
         set to print the file names and summary statistics. This is
-        equivalent to the non-execute mode (also -n) of the make(1S)
-        utility.
+        equivalent to the non-execute mode (also `-n') of the
+        make(1S) utility.
 
     -r (Recurse)
         With the recurse option specified, it is possible to name a
@@ -396,7 +396,7 @@ AUTHOR
     (`perldoc Text::MetaText') for more information on MetaText.
 
 REVISION
-    $Revision: 1.10 $
+    $Revision: 1.11 $
 
 COPYRIGHT
     Copyright (c) 1996-1998 Andy Wardley. All Rights Reserved. This

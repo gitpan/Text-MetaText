@@ -2,7 +2,7 @@
 #
 # Text::MetaText
 #
-#   Version 0.19
+#   Version 0.22
 # 
 #   Copyright (C) 1996-1998 Andy Wardley <abw@kfs.org>.  
 #   All Rights Reserved.
@@ -61,9 +61,13 @@ SYNOPSIS
 
         my $mt = Text::MetaText->new();
 
+        # process file content or text string 
         print $mt->process_file($filename, \%vardefs);
-
         print $mt->process_text($textstring, \%vardefs);
+
+        # pre-declare a BLOCK for subsequent INCLUDE
+        $mt->declare($textstring, $blockname);
+        $mt->declare(\@content, $blockname);
 
 SUMMARY OF METATEXT DIRECTIVES
         %% DEFINE 
@@ -192,7 +196,7 @@ OBTAINING AND INSTALLING THE METATEXT MODULE
         Text-MetaText-<version>.tar.gz
 
     Note that "<version>" represents the current MetaText Revision
-    number, of the form "0.18". See the REVISION section below to
+    number, of the form "0.18". See the REVISION manpage below to
     determine the current version number for Text::MetaText.
 
     Unpack the archive to create a MetaText installation directory:
@@ -236,8 +240,8 @@ OBTAINING AND INSTALLING THE METATEXT MODULE
     the MetaText equivalent of the Unix make(1S) utility.
 
     The installation process detailed above should install metapage
-    in your system's perl 'installbin' directory (try 
-    "perl '-V:installbin'" to check this location). See the metapage
+    in your system's perl 'installbin' directory (try `perl '-
+    V:installbin'' to check this location). See the metapage
     documentation (`perldoc metapage') for more information on
     configuring and using metapage.
 
@@ -249,7 +253,7 @@ AUTHOR
         http://www.kfs.org/~abw/
 
 REVISION
-    $Revision: 0.19 $
+    $Revision: 0.22 $
 
 COPYRIGHT
     Copyright (c) 1996-1998 Andy Wardley. All Rights Reserved.
@@ -261,7 +265,7 @@ SEE ALSO
     For more information, see the accompanying documentation and
     support files:
 
-        README    Text based version of the module documentation.
+        README    Text based version of this module documentation.
         Changes   Somewhat verbose list of per-version changes.
         Todo      Known bugs and possible future enhancements.
         Features  A summary of MetaText features and brief comparison to 

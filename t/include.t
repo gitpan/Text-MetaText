@@ -6,7 +6,7 @@
 # modify $ntests below to set the number of tests.  Test files 
 # should be named $stub.n where 'n' is 1..$ntests
 
-BEGIN { $stub = 'include'; $ntests = 2; 
+BEGIN { $stub = 'include'; $ntests = 3; 
         $| = 1; print "1..", $ntests + 1, "\n"; }
 
 END   { print "not ok 1\n" unless $loaded; }

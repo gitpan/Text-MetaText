@@ -18,7 +18,7 @@
 #
 #----------------------------------------------------------------------------
 #
-# $Id: MetaText.pm,v 0.19 1998/04/02 09:25:16 abw Exp abw $
+# $Id: MetaText.pm,v 0.22 1998/09/01 11:23:14 abw Exp abw $
 #
 #============================================================================
  
@@ -27,9 +27,9 @@ package Text::MetaText;
 use strict;
 use FileHandle;
 use Date::Format;
-use vars qw( $VERSION @ISA $DIRECTIVE $ERROR );
+use vars qw( $VERSION $FACTORY $ERROR );
 
-use Text::MetaText::Directive;
+use Text::MetaText::Factory;
 
 require 5.004;
 
@@ -39,8 +39,9 @@ require 5.004;
 #                      -----  CONFIGURATION  -----
 #========================================================================
  
-$VERSION   = sprintf("%d.%02d", q$Revision: 0.19 $ =~ /(\d+)\.(\d+)/);
-$DIRECTIVE = 'Text::MetaText::Directive';
+$VERSION   = sprintf("%d.%02d", q$Revision: 0.22 $ =~ /(\d+)\.(\d+)/);
+$FACTORY   = 'Text::MetaText::Factory';
+
 
 # debug level constants (debugging will get nicer one day RSN)
 use constant DBGNONE  =>    0;  # no debugging
@@ -102,17 +103,17 @@ sub new {
 
 #========================================================================
 #
-# process_file($file, ...) 
+# process_file($file, \%tags) 
 #
 # Public method for processing files.  Calls _parse_file($file) to 
 # parse and load the file into the symbol table (indexed by $file)
-# and then calls $self->_process($file, @_) to process the symbol table
-# and generate output.  Any other parameters passed to process_file()
-# (such as a pre-defined variables hash, \%tags) are propagated through 
-# to _process() and the return value is propagated back up to the caller.
-#
-# Returns the result of $self->_process($file, @_) which may be undef to
-# indicate a processing error.  May also return undef to indicate a 
+# and then calls $self->_process($file, $tags) to process the symbol 
+# table entry and generate output.  The optional $tags parameter may be 
+# used to refer to a hash array of pre-defined variables which should be 
+# used when processing the file.  
+# 
+# Returns the result of $self->_process($file, $tags) which may be undef 
+# to indicate a processing error.  May also return undef to indicate a 
 # parse error.  On success, a text string is returned which contains the
 # output of the process stage.
 # 
@@ -124,7 +125,6 @@ sub process_file {
 
 
     $self->_DEBUG(DBGFUNC, "process_file($file, %s)\n", join(", ", @_));
-
 
     # parse the file into the symbol table if it's not already there
     unless ($self->_symbol_defined($file)) {
@@ -141,17 +141,18 @@ sub process_file {
 #
 # process_text($text, \%tags) 
 #
+
 # Public method for processing text strings.  Calls _parse_text($text) to 
 # parse the string and return a reference to an anonymous array, $block,
 # which represents the parsed text string, separated by newlines.  This 
 # is then passed to $self->_process($block, @_) along with any other 
-# parameters passed in to process_text() (such as a hash reference of 
-# pre-defined variables).
+# parameters passed in to process_text(), such as $tags which is a 
+# reference to a hash array of pre-defined variables.
 #
-# Returns the result of $self->_process($block, @_) which may be undef to
-# indicate a processing error.  May also return undef to indicate a 
+# Returns the result of $self->_process($block, $tags) which may be undef 
+# to indicate a processing error.  May also return undef to indicate a 
 # parse error.  On success, a text string is returned which contains the
-# output of the process stage.
+# output of the process stage.  
 # 
 #========================================================================
 
@@ -185,6 +186,77 @@ sub process_text {
 sub process {
     my $self = shift;
     $self->process_file(@_);
+}
+
+
+
+#========================================================================
+#
+# declare($input, $name)
+#
+# Public method which allows text blocks and pre-compiled directive 
+# arrays to be installed in the symbol table for subsequent use in
+# %% INCLUDE <something> %% directives.
+#
+# In the simplest case, $input is a text string (i.e. any scalar) which 
+# may contain embedded MetaText directives.  This is parsed using the 
+# _parse_text($input, $name) method which creates a parsed directive 
+# list which is subsequently installed in the symbol table, indexed by
+# $name.  Subsequent directives of the form "%% INCLUDE $name %%" will
+# then correctly resolve the cached contents parsed from the text string.
+#
+# $input may also be a reference to an array of text strings and/or 
+# MetaText directive objects.  These are instances of the 
+# Text::MetaText::Directive class, or sub-classes thereof.  If you know 
+# how to instantiate directive objects directly, then you can store 
+# "pre-compiled" blocks straight into the symbol table using this method.
+# This can significantly speed up processing times for complex, 
+# dynamically contructed blocks by totally elimiating the parsing stage.
+#
+# The MetaText Directive class will shortly be updated (beyond 0.2) 
+# to make this process easier.  At that point, the Directive documentation 
+# will updated to better explain this process.  In the mean time, don't
+# worry if you don't understand this - you're probably not one of the 
+# two people who specifically needed this feature :-)
+#
+# Returns 1 if the symbol table entry was correctly defined.  If a parse
+# error occurs (when parsing a text string), an error is raised and 
+# undef is returned.
+#
+#========================================================================
+
+sub declare {
+    my $self  = shift;
+    my $input = shift;
+    my $name  = shift;
+    my $ref;
+
+    # is $input a reference of some kind?
+    if ($ref = ref($input)) {
+
+	# $input may be an array ref of text/directives
+	$ref eq 'ARRAY' && do {
+	    # get a symbol table entry reference 
+	    my $symtabent = $self->_symbol_entry($name);
+
+	    # clear any existing symbol table entry and push new content
+	    splice(@$symtabent, 0) if scalar @$symtabent;
+	    push(@$symtabent, @$input);
+
+	    # no problem
+	    return 1;
+	};
+
+	# $input may (in the future) be other kinds of refs...
+	$self->_error("Invalid input reference passed to declare()");
+    }
+    else {
+	# $input is not a reference so we assume it is text; we call 
+	# _parse_text($input, $name) to handle it but we do *not* 
+	# directly propagate the return value which is a direct reference 
+	# to the symbol table entry; data encapsulation and all that
+	return $self->_parse_text($input, $name) ? 1 : undef;
+    }
 }
 
 
@@ -237,7 +309,8 @@ sub _configure {
     $self->{ ROGUE }      = {};   # how to handle rogue directives
     $self->{ CASE }       = 0;    # case sensitivity flag
     $self->{ CASEVARS }   = {};   # case sensitive variables
-    $self->{ CHOMP }      = 0;    # chomp straggling newlines
+    $self->{ CHOMP }      = 0;    # chomp straggling newlines 
+    $self->{ TRIM }       = 1;    # trim INCLUDE leading/trailing newlines 
     $self->{ EXECUTE }    = 0;    # execute SUBST as function?
     $self->{ DELIMITER }  = ',';  # what splits a list?
     $self->{ FILTER }     = {     # pre-defined filters
@@ -259,10 +332,9 @@ sub _configure {
     # (but converted to UPPER CASE when stored) and, depending on the
     # option, tested for correctness, manipulated or massaged in some
     # way;  invalid options generate a warning.
+    return unless defined $cfg;
 
-    return unless $cfg;
-
-    # check usage
+    # check a hash ref was supplied as $cfg 
     unless (ref($cfg) eq 'HASH') {
 	$self->_warn(ref($self) . "->new expects a hash array reference\n");
 	return;
@@ -271,7 +343,7 @@ sub _configure {
     foreach (keys %$cfg) {
 
 	# set simple config values (converting keyword to UPPER case)
-	/^(MAXDEPTH|LIB|DELIMITER|CASE|CHOMP|EXECUTE)$/i && do {
+	/^(MAXDEPTH|LIB|DELIMITER|CASE|CHOMP|TRIM|EXECUTE)$/i && do {
 	    $self->{ "\U$_" } = $cfg->{ $_ };
 	    next;
 	};
@@ -354,9 +426,20 @@ sub _configure {
 	    next;
 	};
 
+	# FACTORY must contain a reference to a $FACTORY class or 
+	# derivation of same
+	/^FACTORY$/i && do {
+	    $self->_warn("Invalid factory object"), next
+		unless UNIVERSAL::isa($cfg->{ $_ }, $FACTORY);
+	    $self->{ FACTORY } = $cfg->{ $_ };
+	    next;
+	};
+
 	# warn about unrecognised parameter
 	$self->_warn("Invalid configuration parameter: $_\n");
     }
+
+
 
     # DEBUG code
     if ($self->{ DEBUGLEVEL } & DBGCONF) {
@@ -384,7 +467,7 @@ sub _configure {
 # is found, a number of member data items are initialised, the file is 
 # opened and then _parse($file) is called to parse the file.
 #
-# Returns the result from _parse() or undef on failure.  
+# Returns the result from _parse($file) or undef on failure.  
 #
 #========================================================================
 
@@ -416,7 +499,7 @@ sub _parse_file {
 
     # open file (may still fail if above loop dropped out the bottom)
     unless (defined($self->{ FILE } = new FileHandle $filepath)) {
-	$self->_error("$filepath: $!\n");
+	$self->_error("$filepath: $!");
 	return undef;
     }
 
@@ -454,7 +537,8 @@ sub _parse_text {
     my $symbol = shift;  # may be undef
 
 
-    $self->_DEBUG(DBGFUNC, "_parse_text($text)\n");
+    $self->_DEBUG(DBGFUNC, "_parse_text($text, ", 
+	    defined $symbol ? $symbol : "<undef>", ")\n");
 
 
     # set text string and initialise stats
@@ -471,7 +555,7 @@ sub _parse_text {
 
 #========================================================================
 #
-# _parse() 
+# _parse($symbol) 
 #
 # The _parse() method reads the current input stream which may originate
 # from a file (_parse_file($file)) or a text string (_parse_text($text)).
@@ -502,7 +586,7 @@ sub _parse {
     my $depth  = shift || 1;
     my ($magic1, $magic2);
     my ($line, $nextline);
-    my ($symtabent, $directive);
+    my ($symtabent, $factory, $directive);
 
 
     $self->_DEBUG(DBGFUNC, "_parse(%s)\n", defined $symbol ? $symbol : "");
@@ -510,7 +594,7 @@ sub _parse {
 
     # check for excessive recursion
     if ($depth > $self->{ MAXDEPTH }) {
-	$self->_error("Maximum recursion exceeded in _parse()\n");
+	$self->_error("Maximum recursion exceeded in _parse()");
 	return undef;
     }
 
@@ -524,6 +608,9 @@ sub _parse {
     # clear any existing symbol table entry; this doesn't affect caching,
     # BTW because _parse() only gets called when reload is necessary
     splice(@$symtabent, 0) if scalar @$symtabent;
+
+    # get a reference to the factory object used to create directives
+    return undef unless $factory = $self->_factory();
 
 
     #
@@ -544,7 +631,7 @@ sub _parse {
 		    (.*)        # rest of the line
 		)?              # directive may not be terminated
 		$               # EOL so it all gets eaten
-	    /x) {
+	    /sx) {
 
 	
 	    #
@@ -573,74 +660,92 @@ sub _parse {
 	    #
 
 	    # push any preceding text into the output list
-	    push(@$symtabent, $1) if defined $1;
+	    push(@$symtabent, $1) if length $1;
 
 	    # anything coming after the directive gets re-queued.
 	    # CHOMP can be set to remove straggling newlines 
-	    $self->_unget_line(
-		$self->{ CHOMP }
-		    ? (length $5 ? "$5\n" : "")
-		    : "$5\n"
-	    );
+	    $self->_unget_line($5)
+		unless $self->{ CHOMP } && $5 eq "\n";
 	    $line = "";
 
 	    if (defined $2) {
-		# create a new Text::MetaText::Directive object
-    		my $directive = $DIRECTIVE->new($2);
+
+		# get the create a new Text::MetaText::Directive object
+    		$directive = $factory->create_directive($2);
 
 		# check everything worked OK.  eval?  bletch!
 		unless (defined $directive) {
-		    $self->_error(
-			sprintf("Parse error at %s line %s:\n    %s\n",
-			    $self->{ INPUT }, $self->{ LINENO }, 
-			    eval "\$${DIRECTIVE}::ERROR"));
+		    $self->_parse_error($factory->error());
 		    return undef;
 		}
 
+		my $tt = "Directive created:\n";
+		foreach (keys %$directive) {
+		    $tt .= sprintf("    %-16s => %s\n", 
+			    $_, $directive->{ $_ });
+		}
+		$tt .= "        params:\n";
+		foreach (keys %{ $directive->{ PARAMS } || { } }) {
+		    $tt .= sprintf("    %-16s => %s\n",
+			    $_, $directive->{ PARAMS }->{ $_ });
+		}
+		$self->_DEBUG(DBGTEST, $tt);
+
 		#
 		# some specialist processing required depending on 
-		# $directive->{ KEYWORD }
+		# $directive->{ TYPE }
 		#
 
 		# END(BLOCK|IF)? marks the end of a defined block
-		$directive->{ KEYWORD } =~ /^END(BLOCK|IF)?$/ && do {
+		$directive->{ TYPE } =~ /^END(BLOCK|IF)?$/ && do {
 
 		    # save a copy of the tag that ended this block
 		    # so that the calling method can check it 
-		    $self->{ ENDTAG } = $directive->{ KEYWORD };
+		    $self->{ ENDTAG } = $directive->{ TYPE };
 
 		    # return the symbol table list
 		    return $symtabent;
 		};
 
 		# BLOCK directive defines a sub-block
-		$directive->{ KEYWORD } eq 'BLOCK' && do {
+		$directive->{ TYPE } eq 'BLOCK' && do {
 
 		    # clear ENDTAG data
 		    $self->{ ENDTAG } = "";
 
-		    # parse the defined block and check sanity
-		    return undef 
-			unless $self->_parse($directive->{ IDENTIFIER },
-				$depth + 1);
+		    # we recursively call $self->_parse() to parse the 
+		    # block and return a reference to the symbol table 
+		    # entry; 
+		    my $block = $self->_parse(
+			    $directive->{ IDENTIFIER }, $depth + 1);
+
+		    # check comething was returned 
+		    return undef unless defined $block;
 
 		    # test that the directive that terminated the block 
 		    # was END(BLOCK)?
 		    unless ($self->{ ENDTAG } =~ /^END(BLOCK)?$/) {
-			$self->_error(sprintf(
-			    "Parse error at %s line %s:\n    %s\n",
-			    $self->{ INPUT }, $self->{ LINENO }, 
-			    "ENDBLOCK expected."));
+			$self->_parse_error("ENDBLOCK expected");
 			return undef;
+		    }
+
+		    # if the 'TRIM' option is defined, we should remove
+		    # any leading newline and the final newline from the 
+		    # last line.
+		    if (defined $directive->{ TRIM } 
+    			    ? $directive->{ TRIM }
+    			    : $self->{ TRIM }) {
+			shift @$block
+			    if $block->[0] eq "\n";
+			chomp($block->[ $#{ $block } ]);
 		    }
 
 		    # if the 'PRINT' option was defined, we convert the
 		    # BLOCK directive to an INCLUDE and push it onto the 
 		    # symbol table so that it gets processed and a copy
 		    # of the BLOCK gets pushed to the output
-
 		    if (defined($directive->{ PRINT })) {
-			$directive->{ KEYWORD } = 'INCLUDE';
+			$directive->{ TYPE } = 'INCLUDE';
 			push(@$symtabent, $directive);
 		    }
 
@@ -693,7 +798,7 @@ sub _process {
     my $symbol = shift;
     my $tags   = shift || {};
     my $depth  = shift || 1;
-    my ($symtabent, $directive, $item, $keyword, $space);
+    my ($symtabent, $factory, $directive, $item, $type, $space);
     my ($ident);
     my $proctext;
 
@@ -705,7 +810,7 @@ sub _process {
 
     # check for excessive recursion
     if ($depth > $self->{ MAXDEPTH }) {
-	$self->_error("Maximum recursion exceeded\n");
+	$self->_error("Maximum recursion exceeded");
 	return undef;
     }
 
@@ -717,25 +822,33 @@ sub _process {
     else { 
 	# check the symbol has an entry in the symbol table
     	unless ($self->_symbol_defined($symbol)) {
-	    $self->_error("$symbol: no such block defined\n");
+	    $self->_error("$symbol: no such block defined");
 	    return undef;
 	}
 	$symtabent = $self->_symbol_entry($symbol);
     }
+
+    # get a reference to the factory object and call directive_type()
+    # to determine the kind of Directive objects it creates
+    return undef unless $factory = $self->_factory();
+    $directive = $factory->directive_type();
 
 
     #
     # The symbol table entry is an array reference passed explicitly in
     # $symbol or retrieved by calling $self->_symbol_entry($symbol);
     # Each element in the array can be either a plain text string or an
-    # instance of the $DIRECTIVE class.  The former represent 
-    # normal text blocks in the processed file, the latter represent 
-    # pre-parsed MetaText directives (see _parse()).  A directive will 
-    # contain some of the following elements, based on the directive type 
-    # and other data defined in the directive block:
+    # instance of the directive class created by the factory object.  
+    # The former represent normal text blocks in the processed file, the 
+    # latter represent pre-parsed MetaText directives (see _parse()) that 
+    # have been created by the factory object.  The factory provides the 
+    # directive_type() method for determining the class type of these 
+    # objects.  A directive will contain some of the following elements, 
+    # based on the directive type and other data defined in the directive 
+    # block:
     #
-    #  $directive->{ KEYWORD }     # directive type: INCLUDE, DEFINE, etc
-    #  $directive->{ IDENTIFIER }  # KEYWORD target, i.e. INCLUDE <filename>
+    #  $directive->{ TYPE }        # directive type: INCLUDE, DEFINE, etc
+    #  $directive->{ IDENTIFIER }  # target, i.e. INCLUDE <filename>
     #  $directive->{ PARAMS }      # hash ref of variables defined
     #  $directive->{ PARAMSTR }    # original parameter string
     #  $directive->{ IF }          # an "if=..." conditional
@@ -749,8 +862,7 @@ sub _process {
     foreach $item (@$symtabent) {
 
 	# get rid of the non-directive cases first...
-	# TODO: should check isa($item, $DIRECTIVE)
-	unless (ref($item) eq $DIRECTIVE) {
+	unless (UNIVERSAL::isa($item, $directive)) {
 
 	    # return content if we find the end-of-content marker 
 	    return join("", @output)
@@ -763,32 +875,35 @@ sub _process {
 	}
 
 
-	# test any "if=<condition>" statement...
-	if ($item->{ IF }) {
-	    my $result = $self->_evaluate($item->{ IF }, $tags, 
-			$item->{ DELIMITER } || $self->{ DELIMITER });
-	    next unless defined($result) && $result > 0;
-	}
+	# examine any conditionals (if/unless) if defined 
+	if ($item->{ HAS_CONDITION }) {
 
-	# ...and/or any "unless=<condition>" statement
-	if ($item->{ UNLESS }) {
-	    my $result = $self->_evaluate($item->{ UNLESS }, $tags, 
+    	    # test any "if=<condition>" statement...
+    	    if (defined $item->{ IF }) {
+    		my $result = $self->_evaluate($item->{ IF }, $tags, 
 			$item->{ DELIMITER } || $self->{ DELIMITER });
-	    next if defined($result) && $result != 0;
+    		next unless defined($result) && $result > 0;
+    	    }
+
+    	    # ...and/or any "unless=<condition>" statement
+    	    if (defined $item->{ UNLESS }) {
+    		my $result = $self->_evaluate($item->{ UNLESS }, $tags, 
+			$item->{ DELIMITER } || $self->{ DELIMITER });
+    		next if defined($result) && $result != 0;
+    	    }
 	}
 
 	
-	# we take a copy of the KEYWORD (i.e. directive type) and 
-	# IDENTIFIER (i.e. directive operand)
-	$keyword = $item->{ KEYWORD };
-	$ident   = $item->{ IDENTIFIER };
+	# we take a copy of the directive TYPE and IDENTIFIER (operand)
+	$type  = $item->{ TYPE };
+	$ident = $item->{ IDENTIFIER };
 
 
 	#------------------------------------
-	# switch ($keyword) 
+	# switch ($type) 
 	#
 
-	$keyword eq 'DEFINE' && do {
+	$type eq 'DEFINE' && do {
 
 	    # $tags is a hash array ref passed in to _process().  We must
 	    # clone it before modification in case we should accidentally 
@@ -801,7 +916,7 @@ sub _process {
 	    next;
 	};
 
-	$keyword eq 'INCLUDE' && do {
+	$type eq 'INCLUDE' && do {
 
 	    # an INCLUDE identifier is allowed to contain variable 
 	    # references which must be interpolated.
@@ -817,19 +932,24 @@ sub _process {
 	    $proctext = $self->process_file($ident, $newtags, $depth + 1);
 	    return undef unless defined $proctext;
 
-	    # post-processed output and push onto output list
-	    push(@output, $self->_post_process($item, $proctext));
+	    # push text onto output list, post-processing it along the way
+	    # if $self->{ HAS_POSTPROC } is true (i.e. has filter/format)
+	    push(@output, 
+		$item->{ HAS_POSTPROC }
+		? $self->_post_process($item, $proctext)
+		: $proctext);
 
 	    next;
 	};
 
-	$keyword eq 'SUBST' && do {
+	$type eq 'SUBST' && do {
 
 	    # call _substitute to handle token substitution
 	    $proctext = $self->_substitute($item, $tags);
 
 	    if (defined($proctext)) {
-		$proctext = $self->_post_process($item, $proctext);
+		$proctext = $self->_post_process($item, $proctext)
+		    if $item->{ HAS_POSTPROC };
 	    }
 	    else {
 		# unrecognised token
@@ -852,10 +972,10 @@ sub _process {
 	};
 
 	# default: invalid directive;  this shouldn't happen
-	$self->_warn("Unrecognise directive: $keyword\n")
+	$self->_warn("Unrecognise directive: $type\n")
 
 	#
-	# switch ($keyword)
+	# switch ($type)
 	#------------------------------------
     }
 
@@ -954,6 +1074,40 @@ sub _unget_line {
 
     # unshift (defined) line onto front of list
     unshift(@{ $self->{ LINES } }, $line);
+}
+
+
+
+#========================================================================
+#
+# _factory()
+#
+# Returns a reference to the factory object stored in $self->{ FACTORY }.
+# If this is undefined, an attempt is made to instantiate a factory 
+# object from the default class, $FACTORY, which is then stored in the
+# $self->{ FACTORY } hash entry.
+#
+# Returns a reference to the factory object.  On failure, undef is returned
+# and a warning is issued via _warn().
+#
+#========================================================================
+
+sub _factory {
+    my $self = shift;
+
+
+    # create a default factory if one doesn't already exist
+    unless (defined $self->{ FACTORY }) {
+	# $FACTORY is the default factory package
+	$self->{ FACTORY } = $FACTORY->new()
+	    or $self->_error(
+		  "Factory construction failed: "
+		. "<factory error>"
+	    );
+    }
+
+    # return factory reference
+    $self->{ FACTORY };
 }
 
 
@@ -1527,9 +1681,15 @@ sub _evaluate {
 sub _post_process {
     my $self      = shift;
     my $directive = shift;
-    my $line      = shift || "";
-    my @lines     = split(/\n/, $line);
+    my $line      = shift;
+    my $formats   = {
+	QUOTED    => '"%s"',
+	DQUOTED   => '"%s"',
+	SQUOTED   => "'%s'",
+	MONEY     => "%P%.2f",  # '%P' says "use printf() not time2str()"
+    };
     my ($pre, $post);
+    my @lines;
 
 
     # DEBUG code
@@ -1542,6 +1702,19 @@ sub _post_process {
 	$dbgline = "\"$dbgline\"";
 	$self->_DEBUG(DBGFUNC, "_post_process($directive, $dbgline)\n");
     }
+    $self->_DEBUG(DBGPOST, "Post-process: \n[$line]\n");
+
+
+    # no need to do anything if there's nothing to operate on
+    return "" unless defined $line && length $line;
+
+    # split into lines, accounting for a trailing newline which would
+    # otherwise be ignored by split()
+    @lines = split(/\n/, $line);
+    push(@lines, "") if chomp($line);
+
+
+    $self->_DEBUG(DBGPOST, " -> [%s]\n" , join("]\n    [", @lines));
 
 
     # see if the "FILTER" option is specified
@@ -1606,6 +1779,12 @@ sub _post_process {
     #
     if (defined($directive->{ FORMAT })) {
 	my $format  = $directive->{ FORMAT };
+
+	# the format may refer to a pre-defined one which is to be used 
+	# in its place
+	$format = $formats->{ uc $format } 
+	    if ($format !~ /\W/ && defined $formats->{ uc $format });
+
 	my $fmtdate = ($format =~ /%[^s]/); # use time2str()?
 
 	# does the format include '%P' to request printf()?
@@ -1653,19 +1832,25 @@ sub _post_process {
 sub _dump_symbol {
     my $self   = shift;
     my $symbol = shift;
+    my ($factory, $directive);
     my $copy;
 
 
     $self->_DEBUG(DBGCONT, "-- Pre-processed symbol: $symbol %s\n",
 	    '-' x (72 - 26 - length($symbol)));
 
+    # get a reference to the factory object and call directive_type()
+    # to determine the kind of Directive objects it creates
+    return unless $factory = $self->_factory();
+    $directive = $factory->directive_type();
+
     foreach (@{ $self->{ SYMTABLE }->{ $symbol } }) {
 
 	# is this a directive?
-	ref($_) eq $DIRECTIVE && do {
+	ref($_) eq $directive && do {
 	    $self->_DEBUG(DBGCONT, "%s %s %s %s\n",
 			    $self->{ MAGIC }->[0],
-			    $_->{ KEYWORD }, 
+			    $_->{ TYPE }, 
 			    $_->{ IDENTIFIER } || "<none>",
 			    $self->{ MAGIC }->[1]);
 	    next;
@@ -1696,7 +1881,7 @@ sub _warn {
 
     return &{ $self->{ ERRORFN } }(@_) if defined($self->{ ERRORFN });
 
-    printf STDERR @_;
+    print STDERR @_, "\n";
 }
 
 
@@ -1718,6 +1903,27 @@ sub _error {
     $self->{ ERROR } = $message;
     $self->_warn($message);
 }
+
+
+
+#========================================================================
+#
+# _parse_error($message)
+#
+# Private error reporting method used by the parser.  Add an additional 
+# file/line report to the error message.
+#
+#========================================================================
+
+sub _parse_error {
+    my $self    = shift;
+    my $message = shift || "";
+
+    $self->_error(
+	sprintf("Parse error at %s line %s:\n    $message",
+	$self->{ INPUT }, $self->{ LINENO })
+    );
+}	
 
 
 
@@ -1765,9 +1971,13 @@ Text::MetaText - Perl extension implementing meta-language for processing
 
     my $mt = Text::MetaText->new();
 
+    # process file content or text string 
     print $mt->process_file($filename, \%vardefs);
-
     print $mt->process_text($textstring, \%vardefs);
+
+    # pre-declare a BLOCK for subsequent INCLUDE
+    $mt->declare($textstring, $blockname);
+    $mt->declare(\@content, $blockname);
 
 =head1 SUMMARY OF METATEXT DIRECTIVES
 
@@ -2134,6 +2344,34 @@ although the effect would be identical):
   <space>
   line 2
 
+=item TRIM 
+
+The TRIM configuration parameter, when set to any true value, causes the
+leading and trailing newlines (if present) within a defined BLOCK to be 
+deleted.  This behaviour is enabled by default.  The following block 
+definition:
+
+  %% BLOCK camel %%
+  The eye of the needle
+  %% ENDBLOCK %%
+
+would define the block as "The eye of the needle" rather than 
+"\nThe eye of the needle\n".  With TRIM set to 0, the newlines are 
+left intact.
+
+It is possible to override the TRIM behaviour by specifying the trim 
+value as a parameter in a BLOCK definition directive:
+
+  %% BLOCK trim %%
+  ...content...
+  %% ENDBLOCK %%
+
+or conversely:
+
+  %% BLOCK trim=0 %% 
+  ...content...
+  %% ENDBLOCK %%
+
 =item FILTER
 
 There may be times when you may want to INCLUDE a file or element in a 
@@ -2454,7 +2692,8 @@ produces the output:
     Martin, you Camper!
 
 The process_file() function returns a string containing the processed 
-file or block output.  On error, a warning is generated (see L<ERROR>)
+file or block output.  On error, a warning is generated (see 
+L<USING THE METATEXT MODULE>)
 and undef is returned.
 
     my $output = $mt->process_file("myfile");
@@ -2567,6 +2806,8 @@ a variable called 'homeindex.html'
     %% DEFINE
        homepage = http://$server$homeindex.html   ## WRONG!
     %%
+
+See L<  > below for further information.
    
 Variables defined within a file or passed to the process_file() or 
 process_text() functions as a hash array remain defined until the file 
@@ -2759,6 +3000,16 @@ In these examples, the formatting is applied as if the replacement value/line
 is a character string.  Any of the standard printf(3) format tokens can be 
 used to coerce the value into a specific type.
 
+There are a number of pre-defined format types:
+
+    dquoted      # encloses each line in double quotes: "like this"
+    squoted      # encloses each line in single quotes: 'like this'
+    quoted       # same as "dquoted"
+
+Examples:
+
+    %% some_quote format=quoted %%
+
 As mentioned in the SUBST section above, the TIME variable is used to
 represent the current system time in seconds since the epoch (see time(2)).  
 The "format" option can also be employed to represent such values in a more
@@ -2925,6 +3176,28 @@ This produces the following output:
 Additional variable definitions specified in an INCLUDE directive will be
 applied to blocks just as they would to external files.
 
+By default, BLOCK definitions are "trimmed".  That is, the leading and 
+trailing newlines (if present) in the block definition are deleted.  This
+allows blocks to be defined:
+
+    %% BLOCK example1 %%
+    Like this!
+    %% ENDBLOCK %%
+
+and not:
+
+    %% BLOCK example2 %%Like this!%% ENDBLOCK %%
+
+This behaviour can be disabled by specifying a TRIM configuration 
+parameter with a zero value.  See the TRIM option, mentioned above.  
+A "trim" or "trim=0" parameter can be added to a block to override the 
+behaviour for that BLOCK definition only.  e.g.
+
+    %% BLOCK sig trim=0 %%
+    --
+    This is my .signature
+    %% ENDBLOCK %%
+
 A BLOCK..ENDBLOCK definition that appears in the main part of a document
 (i.e. before, or in the absence of an __END__ line) will not appear in 
 the processed output.  A simple "print" flag added to the BLOCK directive
@@ -2949,6 +3222,84 @@ Conditions ("if" and "unless") can be applied to BLOCK directives, but
 they affect how and when the BLOCK itself is printed, rather than 
 determining if the block gets defined or not.  Conditionals 
 have no effect on BLOCK directives that do not include a "print" flag.  
+
+It is possible to pre-declare blocks for subsequent inclusion by using
+the public declare() method.  The first parameter should be a text string
+containing the content of the block.  The second paramter is the block 
+name by which it should consequently be known.  The content string is 
+parsed and an internal block definition is stored.
+
+Example:
+
+    $mt->declare("<title>%%title%%</title>", html_title);
+
+This can subsequently be used as if the block was defined in any other way:
+
+    %% INCLUDE html_title
+       title = "My test page"
+    %%
+
+It is also possible to pass an array reference to declare() as the content 
+parameter.  In this context, it is assumed that the array is a pre-parsed
+list of text strings or Text::MetaText::Directive (or derivative) references
+which should be installed as the block definition for the named block.
+This process assumes an understanding of the MetaText directive structure
+and internal symbol table entries.  If you don't know why you would want
+to do this, then the chances are that you don't need to do it.  "Experts
+only" in other words.
+
+
+=head1 VARIABLE INTERPOLATION
+
+MetaText allows variable values to be interpolated into directive 
+operands and other variable values.  This is useful for style-sheet
+processing and other applications where a particular view required 
+can be encoded in a variable and interpolated by the processor.
+
+By example, the file 'mousey.html':
+
+    %% INCLUDE $style/header %%
+
+    The cat sat on the mouse.
+
+    %% INCLUDE $style/footer %%
+
+can be processed in the following ways to create customised output:
+
+    $t1 = $mt->process_file('mousey.html', {'style' => 'text'});
+    $t2 = $mt->process_file('mousey.html', {'style' => 'graphics'});
+
+Variable interpolation is also useful for building up complex variables 
+based on sub-elements:
+
+    %% DEFINE root=/user/abw %%
+
+    %% DEFINE 
+       docs   = $root/docs
+       images = $root/images 
+    %%
+
+Note though, that there is no guaranteed order of definition for multiple
+variables within a single DEFINE directive.  The following is INCORRECT as 
+there is no guarantee that 'base' will be defined before 'complex'.
+
+    %% DEFINE 
+       base    = /here
+       complex = $base/and/there    # WRONG! $base may not be defined yet
+    %%
+
+In such circumstances, it is necessary to define variables in separate
+directives.
+
+    %% DEFINE base=/here %%
+    %% DEFINE complex=$base/and/there %%
+
+Where necessary, variable names may be enclosed in braces to delimit them 
+from surrounding text:
+
+    %% DEFINE
+       homepage = http://$server${home}index.html
+    %%
 
 =head1 EXTENDING METATEXT
 
@@ -3021,6 +3372,14 @@ of the file.  e.g. C<%% INCLUDE something ...>  The processor attempts
 to compensate, but check your source files and add any missing MAGIC
 tokens.
 
+=item "Directive constructor failed: %s"
+
+The MetaText parser detected a failed attempt to construct a Directive
+object.  This error should only happen in cases where a derived 
+Directive class has been used (which should imply you know what you're 
+doing and what the error means.  The specific Directive constructor error 
+is appended to the error message.
+
 =item "Invalid configuration parameter: %s"
 
 An invalid configuration parameter was identified in the hash array 
@@ -3036,6 +3395,17 @@ DEBUG sections for more details.
 
 A token was specified for the DEBUGLEVEL configuration item which was 
 invalid.  See the DEBUGLEVEL section for a complete list of valid tokens.
+
+=item "Invalid factory object"
+
+A C<FACTORY> configuration item was specified which did not contain a 
+reference to a Text::MetaText::Factory object, or derivative.
+
+=item "Invalid input reference passed to declare()"
+
+The declare() method was called and the first parameter was not a reference 
+to an ARRAY or a text string.  These are (currently) the only two valid 
+input types.
 
 =item "Invalid rogue option: %s" 
 
@@ -3131,7 +3501,7 @@ community and the Free Software ideology in general.
 
 =head1 REVISION
 
-$Revision: 0.19 $
+$Revision: 0.22 $
 
 =head1 COPYRIGHT
 

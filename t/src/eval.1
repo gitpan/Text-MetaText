@@ -60,6 +60,12 @@ Testing: doit == 0
 Testing: dont == 0
 %% INCLUDE foo pass=34 if="dont == 0" %%
 
+Testing 0
+%% INCLUDE foo pass=35 if=0   %%
+%% INCLUDE foo pass=36 if="0" %%
+Testing 1
+%% INCLUDE foo pass=37 if=1   %%
+%% INCLUDE foo pass=38 if="1" %%
 
 __END__
  

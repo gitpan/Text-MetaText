@@ -41,6 +41,7 @@ sub mt_method {
     foreach (keys %$params) {
 	$text .= sprintf("    %-20s => %s\n", $_, $params->{ $_ });
     }
+    chomp $text;
     $text;
 }
 
@@ -72,5 +73,6 @@ sub mt_function {
     foreach (keys %$params) {
 	$text .= sprintf("    %-20s => %s\n", $_, $params->{ $_ });
     }
+    chomp $text;
     $text;
 }
