@@ -1,0 +1,12 @@
+#
+# This file tests the use of pre-defined values
+#
+
+# explicit SUBST
+%% SUBST foo %%
+--
+%% SUBST bar %%
+==
+
+# implicit SUBST
+%% foo %% %% bar %%

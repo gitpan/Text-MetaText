@@ -1,0 +1,16 @@
+This directory contains the MetaText test scripts (*.t):
+  ./basic.t     Test basic directives such as %% DEFINE %% and %% SUBST %% 
+
+Other files:
+  ./test.pl     Common file for all test scripts.
+
+Additional directories:
+  ./src         Source files used by test scripts
+  ./dest        Post-process output written here
+  ./expect      Expected output, compared against equivalent ./dest file
+  ./elements    Element files used by the above
+
+The scripts are fairly badly hacked together and the tests are largely 
+incomplete.  Erm, sorry about that.  The test results get written to the
+logfile, test.log.
+

@@ -1,0 +1,33 @@
+#
+# This file tests the DEFINE directive
+#
+
+# single value definition
+
+MetaText
+--
+MetaText
+--
+MetaText
+--
+pre-directive MetaText
+--
+MetaText post-directive
+--
+pre-directive MetaText post-directive 
+--
+pre MetaText mid MetaText post
+--
+MetaText
+==
+
+# multiple value definition
+
+one=1  two=2
+--
+
+one=1  two=2  three=3  four=4  
+==
+
+# check that an explicit SUBST works
+one=1  three=3

@@ -1,0 +1,39 @@
+#
+# This file tests the INCLUDE directive with print formats
+#
+
+# simple print format tests with INCLUDE
+%% INCLUDE
+   text
+   format="[%s]"
+%%
+%% INCLUDE
+   text
+   format="-- woops, forgot to include a string marker --"
+%%
+
+# INCLUDE with print format and print filter
+%% INCLUDE
+   text
+   filter="escape([\"])"
+   format="Eliza> \"%s\""
+%%
+
+# TIME is a special variable.  This will return the current system time
+# which will not match the expected test.  The "#pragma ignore" tells the
+# test script to turn off line comparison checking until the next 
+# "#pragma check"
+
+#pragma ignore
+%% TIME %% seconds since the epoch
+%% TIME format="%d-%b-%y" %% 
+#pragma check
+
+%% BLOCK text %%
+The rain in Spain,
+It falls mainly,
+Upon
+The Area Known As
+"The Plain"
+%% ENDBLOCK %%
+

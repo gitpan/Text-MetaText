@@ -1,0 +1,81 @@
+#========================================================================
+#
+# FUTURE ENHANCEMENTS / KNOWN BUG FIXES
+#
+#========================================================================
+
+* Check (and fix, if necessary) the evalutation code which uses string
+  equalitites to compare variables.  This may fail in certain cases
+  (e.g. "000123" > "45")
+
+* _evaluate() uses a 2-step regex to strip surrounding quotes for rhs
+  value (~ line 1138).  This may cause problems (false positive) when 
+  quotes are mis-matched (e.g. 'foo")
+
+* update documentation to note that pre-defined (i.e. passed in the 
+  process() variable hash) variables that resolve to code blocks 
+  execute the code block in substitution.
+
+* Add conditional blocks:
+
+  %% IF <condition> %% 
+     ... 
+  %% ELSE %% 
+     ... 
+  %% ENDIF %% 
+
+* Add for-loop blocks
+
+  %% FOR <variable> = <start> to <end> step <step> %%
+     ...
+  %% ENDFOR %%
+
+  Perhaps with a list of options, rather than a range:
+
+  %% FOR <variable> = "<val1>, <val2>, <val3>, ... " %%
+     ...
+  %% ENDFOR %%
+
+  or:
+
+  %% FOR <variable> in "<val1>, <val2>, <val3>, ..." %%
+     ...
+  %% ENDFOR %%
+
+* "END" as a pseudonym for "ENDBLOCK" (already is), "ENDFOR", "ENDLOOP", etc.
+  
+* Enhance _evaluate() to understand "not" or "!"
+
+* Add INDEX directive to build a list of existing INCLUDE (and others?)
+  directives within a given document/block.  This should be available
+  for use by the loop constructs.  Useful for making tables of contents/
+  indices.
+
+* System variables, such as "ELEMENT_NAME" that are set before, and cleared
+  after process().  Currently, the only "system variable" is "TIME".
+
+* process should also allow FileHandles to be passed.  Something like this 
+  should do the trick for passing a filename, a GLOB or a FileHandle reference.
+
+	unless (ref($file) =~ /^(GLOB|FileHandle)$/) {
+		$thingy = new FileHandle $file or return undef;
+	}
+
+	while (<$file>) {
+	}
+
+* add a "tutorial" section to the docs, covering metapage in particular
+
+* Allow variable values to be interpolated.  How do we stop unintentional
+  interpolation?
+  e.g. %% INCLUDE header title=$heading %%
+
+* Allow configuration items to be specified in directives
+  e.g. %% CONFIGURE rogue="warn"     %%
+       %% CONFIGURE magic="++"       %%
+       ++ CONFIGURE delimiter="#"    ++ 
+       ++ CONFIGURE magic="<!--#-->" ++ # uses DELIMITER
+
+* add an "ignore these files" option to metapage.  Would be useful for 
+  ignoring RCS, CVS, etc., directories or binary files ("images/*").
+

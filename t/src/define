@@ -1,0 +1,38 @@
+#
+# This file tests the DEFINE directive
+#
+
+# single value definition
+%% DEFINE name=MetaText %%
+%%name%%
+--
+%% name %%
+--
+%% name other_junk_should_be_ignored %%
+--
+pre-directive %% name %%
+--
+%% name %% post-directive
+--
+pre-directive %% name %% post-directive 
+--
+pre %% name %% mid %% name %% post
+--
+%%
+	name
+%%
+==
+
+# multiple value definition
+%% DEFINE one=1 two=2 %%
+one=%% one %%  two=%% two %%
+--
+%% DEFINE 
+   three = 3
+   four  = 4
+%%
+one=%% one %%  two=%% two %%  three=%% three %%  four=%% four %%  
+==
+
+# check that an explicit SUBST works
+one=%% SUBST one %%  three=%% SUBST three %%

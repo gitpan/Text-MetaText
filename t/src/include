@@ -1,0 +1,27 @@
+#
+# This file tests the INCLUDE directive
+#
+
+# basic INCLUDE
+%% INCLUDE foobarbaz %%
+--
+pre %% INCLUDE foobarbaz %%
+--
+%% INCLUDE foobarbaz %% post
+--
+pre %% INCLUDE foobarbaz %% post
+--
+pre %% INCLUDE foobarbaz %% mid %% INCLUDE foobarbaz %% post
+--
+%% INCLUDE
+   foobarbaz
+%%
+==
+
+# INCLUDE with params
+%% INCLUDE
+   foobarbaz
+   foo = "--FOO--"
+   bar = "--BAR--"
+   baz = "--BAZ--"
+%%

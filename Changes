@@ -1,0 +1,324 @@
+------------------------------------------------------------------------
+Version 0.01    Date: 1997/04/29 12:09:47
+
+* Original code migrated from previous Template::Base module.  
+
+------------------------------------------------------------------------
+Version 0.02    Date: 1997/04/29 12:12:07
+
+* Cleaned up and optimised much of the existing Template::Base code.
+
+* Added user-definable MAGIC tokens, including different tokens for 
+  start/end of MetaText directive.
+
+* Updated filter functions definition
+
+* Added user-definable warning function (ERROR)
+
+* Added user-definable debug function (DEBUG) providing multi-level
+  reporting
+
+* Replaced old-style typeglobs with FileHandles
+
+* Modified _split_params() to recognise single parameters (e.g. "noprint")
+  as flags rather than requiring a balanced "name = value".  Flags are 
+  added thusly: $directive->{ PARAMS }->{ $flag } = 0;
+
+* Further modified _split_params() to protect multi-word quoted 
+  sequences that may be values to pass to a function without being
+  interpreted as many individual flags.  i.e. "foo bar baz" should
+  *not* be interpreted as ("foo", "bar", "baz").
+
+* Added "noprint" flag to BLOCK definition to prevent inclusion of the
+  BLOCK definition in the processed output.  This changes in V0.10 where
+  the default behaviour becomes "noprint" and printing is activated with 
+  the "print" flag.  
+
+------------------------------------------------------------------------
+Version 0.03    Date: 1997/04/30 08:20:12
+
+* Added ROGUE option to indicate how unrecognised tokens should be 
+  handled.
+
+* Added primitive LOOP construct.
+
+------------------------------------------------------------------------
+Version 0.04    Date: 1997/04/30 14:34:03
+
+* Fully implemented LOOP construct.   LOOP segments are defined between 
+  %% LOOP %% and %% ENDLOOP %% and _pre-process()'d into the symbol table 
+  as LOOP.name (name defaults to a unique zero-padded 5-digit number).
+  This is a test state.  Ideally, looping constructs should be built 
+  into INCLUDE directives.  Lo and behold!  See the next comment...
+
+* Removed LOOP directive (ha!) and built functionality into the standard
+  INCLUDE directive.  This now supports the "repeat" flag, with an
+  optional value (i.e. "repeat = 5").  Without the value, the parameters
+  supplied to the INCLUDE are split by a delimiter (comma, ',' by 
+  default, but can be set with "delimiter = <string>") and the loop 
+  repeats until all the data has been used.  In the case that the block
+  loops more times than a given parameter has values (i.e. repeat=5
+  data="10,15,20") then the last value is repeated.  NOTE: LOOP constructs
+  have since been removed from MetaText.  They may return one day.
+
+* Formalised case sensitivity.  Keywords and special directive variables
+  (e.g. REPEAT, IF, etc) are forced to upper case, parameter names to 
+  lower case.  Identifiers (which may reference a case-sensitive external
+  file) and parameter values are left as found.  
+  This changes again in version 0.5)
+
+* Modified _parse_directive() to handle all special parameters in a 
+  generic way.  Previously, a special function, _extract_conditional()
+  was employed to identify "if=<condition>" statements.  This is no
+  longer required.
+
+------------------------------------------------------------------------
+Version 0.05    Date: 1997/05/02 06:48:31
+
+* Further enhanced ROGUE error reporting to re-insert cleaned-up version
+  of original tag (default), delete the tag in entirety (delete) and
+  in either case, warn about the bad token (warn).
+
+* Changed case sensitivity handling (again).  I decided it was incorrect 
+  to force all parameter names and identifiers to lower case.  Why not
+  let the users deferentiate between "foo" and "FOO" if they want to?
+  There is now a CASE configuration option.  If it evaluates true,
+  MetaText runs in case-sensitive mode, preserving the case of all
+  identifiers and parameters (except for directive control params such
+  as REPEAT, DELIMITER etc. which are always forced to UPPER).  When
+  CASE is false, all parameters and identifiers are converted to lower
+  case.  This will cause problems if you try to INCLUDE an external
+  file whose name is not fully lower case.  i.e. "INCLUDE Foo/Bar"
+  becomes "INCLUDE foo/bar".  For this reason, case sensitive is the
+  default mode.
+
+* Modified _split_params() to allow single quotes ''' to be used to 
+  encompass multi-word values in addition to the usual double quotes '"'.
+  Cleaned up the regex code considerably, pre-defining various elements
+  to make the final expression readable and easily understandable <gasp!>
+
+* Modified _split_params() to allow variables to reference other 
+  variables (e.g. alias = $name).  Added _interpolate_tags() to
+  interpolate all these values before passing them to process(), 
+  _substitute() and _evaluate.  Modified _evaluate() to understand and
+  account for references and cleaned up much of the evaluation code.
+  (This changes in version 0.6)
+  
+* Added DELIMITER option, allowing the user to specify the default 
+  DELIMITER for splitting strings.  Specific delimiters can still be
+  specified within individiual operations.
+
+* Added some extra characters to the characters class that can delimit
+  directories in a DIRECTORY or DATADIR string.  Currently [|;,:].
+
+------------------------------------------------------------------------
+Version 0.06    Date: 1997/05/02 14:43:18
+
+* Fixed a minor bug in _tidy() that was stripping quotes from quoted
+  parameter lists.
+
+* Shifted lower case conversion (if $self->{ CASE }) out of 
+  _split_params() and put it into _parse_directive() to allow slightly
+  more flexibility in parameter parsing.
+
+* Removed variable interpolation from basic block parameters.  It was 
+  getting very complicated to track what was what.  Despite coding a
+  reasonably elegant solution, I decided that it made the code more
+  complex for very little gain.  Condition statements (if="<condition>")
+  may include variable references as may INCLUDE identifiers, e.g.
+  %% INCLUDE $name %%
+
+------------------------------------------------------------------------
+Version 0.07    Date: 1997/05/06 16:04:45
+
+* Added generic _interpolate() function for expanding variable values
+  within a string.  Block idetifiers are now passed through this function
+  to permit directives such as "%% INCLUDE $name %%".  Ambiguous names
+  can be resolved by surrounding the variable name in braces, as per the
+  Unix shell syntax.  e.g. "foo${bar}baz".
+
+* Modified _evaluate() to use hash array to reference anonymous code
+  subs to do comparisons (==, !=, <=, etc) and boolean operations 
+  (and, or, xor, etc).  
+
+* Quotes are implicitly removed from around absolute values in 
+  conditional equations.  e.g. with the following conditional: 
+  if="name=\"John Doe\"" the variable 'name' is implictly changed from
+  '"John Doe"' to 'John Doe'.  The original escaped quotes *ARE* 
+  required to quote the whitespace within the variable value.
+   
+* Added regex matching (=~ and !~) to _evaluate() function for 
+  conditionals.
+
+* Relaxed valid/invalid variable checking within _evaluate() to allow
+  the simple expression 'if="$variable"' to simply return 0 if 
+  $variable isn't defined rather than bleat about it.
+
+------------------------------------------------------------------------
+Version 0.08    Date: 1997/05/08 08:34:41
+
+* Fixed bug where surrounding quotes weren't being stripped from if=""
+  values in all cases.
+
+* Changed _evalute() to evaluate parameter values (as well as parameter 
+  names) case-insensitively unless CASE sensitive flag is set.
+ 
+* Added "in" comparator in _evaluate() to determine if a value is in a 
+  given list.  e.g. "$name in \"fred,tom,harry\"".  Uses the current
+  DELIMITER value (or the default) to delimit the list.
+
+* Changed name of debug function from _debug() to _DEBUG() to enhance 
+  readability.
+
+------------------------------------------------------------------------
+Version 0.09    Date: 1997/05/15 09:13:00
+
+* Added an "UNLESS" option to INCLUDE directives for convenience, 
+  effectively giving the opposite to the "IF" directive.  An INCLUDE 
+  directive may contain both an IF and an UNLESS statement in which 
+  case, the IF is evaluated first, and the UNLESS second.  If the
+  IF condition fails, the UNLESS will not be evaulated.  If the UNLESS
+  evaluates true, the INCLUDE will be skipped, even if the IF condition
+  returned TRUE. 
+
+* Added INDEX directive to build a list of INCLUDE directives within a
+  block.  This is removed in a later version, not least of all because
+  it proved to be unwieldy and of limited use.
+
+* Optimised and tidied up the main _process() loop.
+
+------------------------------------------------------------------------
+Version 0.10    Date: 1997/05/19 08:37:05
+
+* Made a couple of minor changes to get Perl 5.004 running -w without 
+  warnings.
+
+* Enhanced _index() to only index INCLUDE directives whose identifiers
+  match the "element=<regex>,<regex>..." pattern specified in the INDEX
+  directive.  Case sensitivity to the pattern match depends on 
+  $self->{ CASE }.
+
+* Changed the rather generic "DIRECTORY" configuration option to 
+  "ELEMPATH" (element path) which more accurately describes what it
+  actually refers to.
+
+* Finally fixed and rationalised the handling of carriage returns at
+  the end of lines.  The problem was, particularly with DEFINE 
+  directives, where the directive was removed during processing 
+  leaving a blank line it it's place.  A number of DEFINE directives 
+  on subsequent lines (as is quite common) leaves a great big chunk of 
+  whitespace.  The solution is to ignore any carriage return that 
+  occurs immediately after the closing directive magic token.  Any 
+  trailing characters after the directive, including whitespace, will 
+  get a carriage return added to it.  The original carriage return 
+  gets eaten by the regex, in case you wondered what happened to it.
+
+* Changed the "print" INCLUDE option (in which the print format could
+  be specified) to be "format" which makes more sense, IMHO.
+
+* Removed the print format and filter code out of process() and into
+  it's own function, _post_process().  This has several advantages.
+  Firstly, it means that the code can conveniently be called for other
+  directives apart from INCLUDE (SUBST now passes it's output through
+  the printf filter as well).  Secondly, the directive object itself 
+  can be passed to _post_process() meaning that the "filter" and 
+  "format" options can now be stored as internal directive values
+  rather than entries in the tags table.
+
+* Changed the print format code to attempt to recognise the difference
+  between a printf() format and a time2str() format.  A format that
+  matches "%[^s]" is passed through time2str() from Date::Format. Other
+  formats containing no other marker than "%s" are assumed to be 
+  printf() formats.  A special "%P" marker in the format is ignored, 
+  but silently invokes the printf() option regardless. "%s" is handled
+  identically be either printf() or time2str().
+
+* Modified _substitute() slightly to look for certain tag(s) before 
+  attempting to call the tag as a function.  The tag(s) and their 
+  associated return values are: 
+
+    TIME       Returns current system time in seconds sinch the epoch 
+
+* Changed AUTOLOAD to return undef if the original (unresolvable)
+  directive should be left as is.  The value is passed up through 
+  _substitute() to the relevant SUBST block in _process().  The 
+  original directive is reconstructed here and the _post_process()
+  step is bypassed.
+
+* Added POD documentation.
+
+------------------------------------------------------------------------
+Version 0.11    Date: 1997/07/22 10:18:15
+
+* Fixed fix in AUTOLOAD that was keeping directives from being deleted 
+  when ROGUE=delete was defined.
+
+* Fixed bug in process() which was returning an output list rather than
+  concatenating the contents when __END__ was detected.  The usual 
+  return point had been changed some time ago.
+
+* Added CHOMP configuration item which allows the user to specify the
+  end-of-line processing behaviour.  With CHOMP defined to any true value, 
+  a newline immediately following a directive will be chomped off.  
+  Modified _pre_process() to handle this.
+
+* Corrected, enhanced and added further POD documentation.
+
+* Added 'postproc' debug flag for examining _post_process() activity
+  and data.
+
+------------------------------------------------------------------------
+Version 0.12    Date: 1997/11/28 07:56:24
+
+* Replaced the DEBUGLEVEL constant sub-routines for the new "use constant...";
+
+* Updated the tests (a little).
+
+* Added the EXECUTE configuration option to control how the processor 
+  attempts to resolve unknown identifiers.  With EXECUTE true, the 
+  _substitute() method tried to run it as a package method.  With EXECUTE
+  set > 1, it will also try to run it as a function in the main package, 
+  assuming that the previous method call failed.
+
+* Added PRINT as a special directive parameter (for BLOCK) rather than have
+  it as just another parameter.
+
+* Re-organised the code a little, listing methods roughly in the order in
+  which they're used.
+
+* Replaced the "ELEMPATH" configuration variable with "LIB".
+
+* Moved the revision history (this list) and the bugs/future enhancements
+  lists into separate files: "Changes" and "Todo", respectively.
+
+* Changes _parse_params() to unescape any escaped characters, rather than
+  just quotes.
+
+------------------------------------------------------------------------
+Version 0.13    Date: 1997/12/05 15:58:02
+
+* Modified Makefile.PL to install metapage as well.
+
+* Updated and completed documentation for module.
+
+------------------------------------------------------------------------
+Version 0.14    Date: 1998/01/30 15:50:37
+
+* Fixed some significant bugs in the _evaluate() method and added 'eval'
+  script to test general evaluation conditions.
+
+* Fixed regex comparitor match bug in _evaluate() which was causing the 
+  simple evaluation 'if="variable"' to fail.
+
+* Fixed a number of typos and made a few enhancements to the
+  Text::MetaText documentation.
+
+* Added documentation to metapage utility.
+
+------------------------------------------------------------------------
+Version 0.15    Date: 1998/02/04 08:57:14
+
+* Added 'ignore' and 'accept' options to metapage (1.06)
+
+* First public beta release.
+

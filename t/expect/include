@@ -1,0 +1,36 @@
+#
+# This file tests the INCLUDE directive
+#
+
+# basic INCLUDE
+FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **>
+--
+pre FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **>
+--
+FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **> post
+--
+pre FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **> post
+--
+pre FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **> mid FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **> post
+--
+FOO: <** FOO **>
+BAR: <** BAR **>
+BAZ: <** BAZ **>
+==
+
+# INCLUDE with params
+FOO: --FOO--
+BAR: --BAR--
+BAZ: --BAZ--

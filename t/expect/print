@@ -1,0 +1,38 @@
+#
+# This file tests the INCLUDE directive with print formats
+#
+
+# simple print format tests with INCLUDE
+[]
+[The rain in Spain,]
+[It falls mainly,]
+[Upon]
+[The Area Known As]
+["The Plain"]
+-- woops, forgot to include a string marker --
+-- woops, forgot to include a string marker --
+-- woops, forgot to include a string marker --
+-- woops, forgot to include a string marker --
+-- woops, forgot to include a string marker --
+-- woops, forgot to include a string marker --
+
+# INCLUDE with print format and print filter
+Eliza> ""
+Eliza> "The rain in Spain,"
+Eliza> "It falls mainly,"
+Eliza> "Upon"
+Eliza> "The Area Known As"
+Eliza> "\"The Plain\""
+
+# TIME is a special variable.  This will return the current system time
+# which will not match the expected test.  The "#pragma ignore" tells the
+# test script to turn off line comparison checking until the next 
+# "#pragma check"
+
+#pragma ignore
+880705834 seconds since the epoch
+28-Nov-97 
+#pragma check
+
+
+
